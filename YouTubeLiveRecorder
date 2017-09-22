@@ -427,7 +427,7 @@ class RecorderProcess(multiprocessing.Process):
                 self.conn.send(line)
 
     def fetch_stream_info(self, live_url):
-        ytdl_cmd = ['youtube-dl', '--dump-json', live_url]
+        ytdl_cmd = ['youtube-dl', '--dump-json', '--youtube-skip-dash-manifest', live_url]
         self.log_command(ytdl_cmd)
         ytdl_process = subprocess.Popen(
             ytdl_cmd,

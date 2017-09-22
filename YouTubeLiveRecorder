@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+
+import json
+import logging
+import multiprocessing
+import os
+import queue
+import shlex
+import sys
+import subprocess
+import tempfile
+import threading
+import time
+
+from PyQt5.QtCore import (
+    Qt,
+    QObject,
+    QSettings,
+    QThread,
+    pyqtSignal,
+    pyqtSlot,
+)
+from PyQt5.QtGui import (
+    QTextCursor,
+    QTextOption,
+)
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFileDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QWidget,
+)
+
+
+app = QApplication(sys.argv)
+
+APP_AUTHOR = 'org.zhimingwang'
+APP_NAME = 'YouTubeLiveRecorder'
+
+DOWNLOADS_DIR = os.path.expanduser('~/Downloads')
+
+LOGGING_FORMATTER_OPTIONS = dict(
+    fmt='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S',
+)
+
+
+class MainWindow(QMainWindow):
+
+    recordingInitiated = pyqtSignal(str, str, bool)
+    recordingCanceled = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+
+        self.thread = QThread()
+        self.worker = Worker(self)
+
+        self.initUI()
+        self.initSignals()
+
+        self.worker.moveToThread(self.thread)
+        self.thread.start()
+
+    def initUI(self):
+        self.resize(500, 400)
+        self.setMinimumSize(400, 250)
+
+        self.settings = QSettings(APP_AUTHOR, APP_NAME)
+        self.restoreGeometry(self.settings.value('geometry', b''))
+        self.restoreState(self.settings.value('windowState', b''))
+
+        self.setWindowTitle('YouTube Live Recorder')
+
+        urlInputLabel = QLabel('Live URL:')
+        urlInputBox = QLineEdit(self, placeholderText='https://youtube.com/ChinaSNH48/live')
+
+        outputFileInputLabel = QLabel('Output file:')
+        outputFileInputBox = QLineEdit(
+            self, placeholderText='Auto-determined by youtube-dl if left blank.')
+        outputFileSelector = QPushButton('Select', maximumWidth=100)
+
+        overwriteLabel = QLabel('Overwrite:')
+        overwriteCheckbox = QCheckBox('(Overwrite if output file exists.)',
+                                      styleSheet='color: gray')
+
+        recordButton = QPushButton('Record', maximumWidth=150)
+        stopButton = QPushButton('Stop', maximumWidth=150, enabled=False)
+
+        buttonsLineLayout = QHBoxLayout()
+        buttonsLineLayout.addWidget(recordButton)
+        buttonsLineLayout.addWidget(stopButton)
+
+        messagesBox = QTextEdit(self, readOnly=True, styleSheet='font-family: monospaced')
+        messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
+
+        mainLayout = QGridLayout(spacing=8)
+        mainLayout.addWidget(urlInputLabel, 0, 0)
+        mainLayout.addWidget(urlInputBox, 0, 1, 1, 2)
+        mainLayout.addWidget(outputFileInputLabel, 1, 0)
+        mainLayout.addWidget(outputFileInputBox, 1, 1)
+        mainLayout.addWidget(outputFileSelector, 1, 2)
+        mainLayout.addWidget(overwriteLabel, 2, 0)
+        mainLayout.addWidget(overwriteCheckbox, 2, 1)
+        mainLayout.addLayout(buttonsLineLayout, 3, 0, 1, 3)
+        mainLayout.addWidget(messagesBox, 4, 0, 1, 3)
+
+        mainWidget = QWidget(self)
+        mainWidget.setLayout(mainLayout)
+        self.setCentralWidget(mainWidget)
+
+        outputFileSelector.clicked.connect(self.selectOutputFile)
+        recordButton.clicked.connect(self.initiateRecording)
+        stopButton.clicked.connect(self.cancelRecording)
+
+        self.urlInputBox = urlInputBox
+        self.outputFileInputBox = outputFileInputBox
+        self.overwriteCheckbox = overwriteCheckbox
+        self.recordButton = recordButton
+        self.stopButton = stopButton
+        self.messagesBox = messagesBox
+
+        self.show()
+
+    def initSignals(self):
+        self.recording = False
+        self.recordingInitiated.connect(self.worker.record)
+        self.recordingCanceled.connect(self.worker.stop)
+
+    def closeEvent(self, event):
+        self.settings.setValue('geometry', self.saveGeometry())
+        self.settings.setValue('windowState', self.saveState())
+        super().closeEvent(event)
+
+    @pyqtSlot()
+    def selectOutputFile(self):
+        options = QFileDialog.Options() | QFileDialog.DontConfirmOverwrite
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 'Output file', DOWNLOADS_DIR,
+            'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
+        self.outputFileInputBox.setText(filename)
+
+    @pyqtSlot()
+    def initiateRecording(self):
+        liveUrl = self.urlInputBox.text()
+        if not liveUrl:
+            QMessageBox.critical(self, 'Error', 'Live URL is required.')
+            return
+
+        outputFile = self.outputFileInputBox.text()
+        if os.path.exists(outputFile):
+            setOverwrite = QMessageBox.question(
+                self, 'Overwrite?', 'The file you selected already exists. Overwrite?',
+                defaultButton=QMessageBox.No,
+            )
+            if setOverwrite == QMessageBox.Yes:
+                self.overwriteCheckbox.setChecked(True)
+            else:
+                return
+
+        overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
+
+        self.recordingInitiated.emit(liveUrl, outputFile, overwrite)
+        self.recording = True
+        self.recordButton.setEnabled(False)
+        self.stopButton.setEnabled(True)
+
+    @pyqtSlot()
+    def cancelRecording(self):
+        self.recordingCanceled.emit()
+
+    @pyqtSlot(str)
+    def printMessage(self, message):
+        # Make sure the cursor is at the end (readOnly does not disable
+        # cursor interaction, unfortunately).
+        self.messagesBox.moveCursor(QTextCursor.End)
+        self.messagesBox.insertPlainText(message)
+
+    @pyqtSlot()
+    def handleRecordingStopped(self):
+        self.recording = False
+        self.recordButton.setEnabled(True)
+        self.stopButton.setEnabled(False)
+
+    @pyqtSlot()
+    def cleanUp(self):
+        self.recordingCanceled.emit()
+        # Wait for recording to stop (max 3 seconds)
+        started_waiting = time.time()
+        while self.recording and time.time() - started_waiting <= 3:
+            app.processEvents()
+        self.thread.quit()
+        if not self.thread.wait(3000):
+            self.thread.terminate()
+
+
+class Worker(QObject):
+
+    newMessage = pyqtSignal(str)
+    recordingStopped = pyqtSignal()
+
+    def __init__(self, gui):
+        super().__init__()
+        self.gui = gui
+        self.initSignals()
+        self.initLogger()
+
+    def initSignals(self):
+        self.newMessage.connect(self.gui.printMessage)
+        self.recordingStopped.connect(self.gui.handleRecordingStopped)
+
+    def initLogger(self):
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        handler = SignalEmittingHandler(self.newMessage)
+        handler.setFormatter(logging.Formatter(**LOGGING_FORMATTER_OPTIONS))
+        self.logger.addHandler(handler)
+
+    @pyqtSlot(str, str, bool)
+    def record(self, liveUrl, outputFile, overwrite):
+        self.newMessage.emit('=' * 30 + '\n')
+        self.logger.info('Recording initiated: %s', liveUrl)
+        self.logger.info('Recording to file: %s (%s)',
+                         outputFile if outputFile else '<auto>',
+                         'overwrite if exists' if overwrite else 'never overwrite')
+
+        connRecv, connSend = multiprocessing.Pipe()
+        recorder = RecorderProcess(liveUrl, outputFile, overwrite, connSend)
+        recorder.start()
+
+        self.interrupted = False
+        while not self.interrupted:
+            while connRecv.poll():
+                message = connRecv.recv()
+                self.newMessage.emit(message)
+            if not recorder.is_alive():
+                break
+            app.processEvents()
+
+        if recorder.is_alive():
+            # Interrupted by a signal.
+            self.logger.warning('Recording interrupted')
+            # TODO: kill the proc tree with psutil
+            # https://stackoverflow.com/a/4229404
+            recorder.terminate()
+        else:
+            # Worker process finished.
+            if recorder.exitcode == 0:
+                self.logger.info('Recording finished')
+            else:
+                self.logger.error('Recording failed')
+        self.newMessage.emit('=' * 30 + '\n\n')
+
+        recorder.join(0.5)
+        self.recordingStopped.emit()
+
+    @pyqtSlot()
+    def stop(self):
+        self.interrupted = True
+
+
+# We use snake case for the Qt-free part. Camel case is gross.
+class RecorderProcess(multiprocessing.Process):
+
+    # conn is the sending end of a multiprocessing.Pipe.
+    def __init__(self, live_url, output_file, overwrite, conn):
+        super().__init__()
+        self.live_url = live_url
+        self.output_file = output_file
+        self.overwrite = overwrite
+        self.conn = conn
+        self.init_logger()
+
+    def init_logger(self):
+        self.logger = PipingLogger(self.conn, level=logging.INFO, **LOGGING_FORMATTER_OPTIONS)
+
+    def run(self):
+        stream_url, auto_filename_no_ext = self.fetch_stream_info(self.live_url)
+        if not self.output_file:
+            self.output_file = os.path.join(DOWNLOADS_DIR, '%s.ts' % auto_filename_no_ext)
+
+        self.logger.info('Stream URL: %s', stream_url)
+        self.logger.info('Output file: %s', self.output_file)
+        self.record_stream(stream_url, self.output_file, overwrite=self.overwrite)
+
+        self.conn.close()
+
+    def log_command(self, cmd):
+        msg = ' '.join(shlex.quote(arg) for arg in cmd)
+        msg = msg.replace('%', '%%')
+        self.logger.info(msg)
+
+    # Read an output stream (stdout, stderr, or combined) of a
+    # subprocess to depletion, while sending read content to the pipe
+    # line by line, in real time.
+    #
+    # The subprocess should be opened with bufsize=1 and
+    # universal_newlines=True (text mode, line buffered).
+    #
+    # Credit: https://stackoverflow.com/a/4896288
+    def pipe_output(self, process, stream):
+        def queue_up_read(fp, queue):
+            for line in fp:
+                queue.put(line)
+
+        output_queue = queue.Queue()
+        output_reader_thread = threading.Thread(
+            target=queue_up_read,
+            args=(stream, output_queue),
+            daemon=True,
+        )
+        output_reader_thread.start()
+
+        while process.poll() is None:
+            try:
+                line = output_queue.get_nowait()
+            except queue.Empty:
+                continue
+            else:
+                self.conn.send(line)
+        while True:
+            try:
+                line = output_queue.get_nowait()
+            except queue.Empty:
+                break
+            else:
+                self.conn.send(line)
+
+    def fetch_stream_info(self, live_url):
+        ytdl_cmd = ['youtube-dl', '--dump-json', live_url]
+        self.log_command(ytdl_cmd)
+        ytdl_process = subprocess.Popen(
+            ytdl_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            universal_newlines=True,
+        )
+        self.pipe_output(ytdl_process, ytdl_process.stderr)
+        json_output = ytdl_process.stdout.read()
+        if ytdl_process.returncode != 0:
+            self.logger.error('youtube-dl failed with exit status %d', ytdl_process.returncode)
+            sys.exit(1)
+
+        try:
+            metadata = json.loads(json_output)
+        except json.JSONDecodeError as err:
+            fd, path = tempfile.mkstemp()
+            with os.fdopen(fd, 'w') as fp:
+                fp.write(json_output)
+            self.logger.error('Failed to decode JSON: %s', err)
+            self.logger.error('Response recorded to %s', path)
+            sys.exit(1)
+
+        # TODO: Guard for KeyError, AttributeError
+        format_id = metadata['format_id']
+        for stream in metadata['formats']:
+            if stream['format_id'] == format_id:
+                stream_url = stream['url']
+                protocol = stream['protocol']
+                if protocol != 'm3u8':
+                    self.logger.warning(
+                        'Unsupported protocol %s; is this really a live stream?', protocol)
+                break
+        else:
+            self.logger.error('format %s not found', format_id)
+            sys.exit(1)
+        auto_filename = metadata['_filename']
+        auto_filename_no_ext = os.path.splitext(os.path.basename(auto_filename))[0]
+        return stream_url, auto_filename_no_ext
+
+    def record_stream(self, stream_url, output_file, overwrite=False):
+        ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
+                      '-y' if overwrite else '-n', output_file]
+        self.log_command(ffmpeg_cmd)
+        ffmpeg_process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            universal_newlines=True,
+        )
+        self.pipe_output(ffmpeg_process, ffmpeg_process.stdout)
+        if ffmpeg_process.returncode != 0:
+            self.logger.error('ffmpeg failed with exit status %d', ffmpeg_process.returncode)
+            sys.exit(1)
+
+
+class SignalEmittingHandler(logging.Handler):
+
+    # signal is a Worker.newMessage singal.
+    def __init__(self, signal):
+        super().__init__()
+        self.signal = signal
+
+    def emit(self, record):
+        self.signal.emit(self.format(record) + '\n')
+
+
+# A basic mock logger used in a RecorderProcess.
+#
+# We cannot use an actual logger (regardless of name passed to
+# logging.getLogger), since on macOS, using the logger (e.g. calling
+# logger.info) inside the forked process causes an error:
+#
+#   The process has forked and you cannot use this CoreFoundation functionality safely. You MUST exec().
+#   Break on __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__() to debug.
+#
+# Possibly due to root logger interactions (just my guess).
+
+class PipingLogger(object):
+
+    _levelToName = {
+        logging.CRITICAL: 'CRITICAL',
+        logging.ERROR: 'ERROR',
+        logging.WARNING: 'WARNING',
+        logging.INFO: 'INFO',
+        logging.DEBUG: 'DEBUG',
+        logging.NOTSET: 'NOTSET',
+    }
+
+    # conn is the sending end of a multiprocessing.Pipe.
+    #
+    # fmt and datefmt are the same as the arguments to the logging.Formatter
+    # constructor, except fmt only supports the %-style, and the following
+    # attributes: asctime, levelname, and message.
+    def __init__(self, conn, level=logging.INFO, fmt='', datefmt=''):
+        self.conn = conn
+        self.level = level
+        self.fmt = fmt
+        self.datefmt = datefmt
+
+    def debug(self, msg, *args, **kwargs):
+        self.log(logging.DEBUG, msg, *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        self.log(logging.INFO, msg, *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        self.log(logging.WARNING, msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        self.log(logging.ERROR, msg, *args, **kwargs)
+
+    def critical(self, msg, *args, **kwargs):
+        self.log(logging.CRITICAL, msg, *args, **kwargs)
+
+    # kwargs are ignored.
+    def log(self, level, msg, *args, **kwargs):
+        if level < self.level:
+            return
+        record = dict(
+            asctime=time.strftime(self.datefmt),
+            levelname=self._levelToName.get(level, 'UNKNOWN'),
+            message=msg % args,
+        )
+        self.conn.send((self.fmt % record) + '\n')
+
+
+if __name__ == '__main__':
+    window = MainWindow()
+    app.aboutToQuit.connect(window.cleanUp)
+    sys.exit(app.exec_())

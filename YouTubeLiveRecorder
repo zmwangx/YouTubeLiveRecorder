@@ -453,17 +453,20 @@ class RecorderProcess(multiprocessing.Process):
             sys.exit(1)
 
         try:
+            if not metadata['is_live']:
+                # Refuse to download a non-livestream.
+                self.logger.error('Not a livestream.')
+                sys.exit(1)
             format_id = metadata['format_id']
             for stream in metadata['formats']:
                 if stream['format_id'] == format_id:
                     stream_url = stream['url']
                     protocol = stream['protocol']
                     if protocol != 'm3u8':
-                        self.logger.warning(
-                            'Unsupported protocol %s; is this really a live stream?', protocol)
+                        self.logger.warning('Unsupported protocol %s', protocol)
                     break
             else:
-                self.logger.error('format %s not found', format_id)
+                self.logger.error('Format %s not found', format_id)
                 sys.exit(1)
             auto_filename = metadata['_filename']
             auto_filename_no_ext = os.path.splitext(os.path.basename(auto_filename))[0]

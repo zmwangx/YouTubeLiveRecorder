@@ -14,6 +14,7 @@ import threading
 import time
 
 import appdirs
+import psutil
 from PyQt5.QtCore import (
     Qt,
     QObject,
@@ -329,9 +330,18 @@ class Worker(QObject):
         if recorder.is_alive():
             # Interrupted by a signal.
             self.logger.warning('Recording interrupted')
-            # TODO: kill the proc tree with psutil
-            # https://stackoverflow.com/a/4229404
-            recorder.terminate()
+
+            # Use psutil to kill the entire proc tree in a cross-platform way.
+            # Credit: https://stackoverflow.com/a/4229404
+            # https://psutil.readthedocs.io/en/latest/#kill-process-tree
+            parent = psutil.Process(recorder.pid)
+            procs = parent.children(recursive=True)
+            procs.append(parent)
+            for proc in procs:
+                proc.terminate()
+            gone, alive = psutil.wait_procs(procs, timeout=1)
+            for proc in alive:
+                proc.kill()
         else:
             # Worker process finished.
             if recorder.exitcode == 0:

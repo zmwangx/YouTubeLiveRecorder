@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import configparser
 import json
 import logging
 import multiprocessing
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import time
 
+import appdirs
 from PyQt5.QtCore import (
     Qt,
     QObject,
@@ -45,12 +47,64 @@ app = QApplication(sys.argv)
 APP_AUTHOR = 'org.zhimingwang'
 APP_NAME = 'YouTubeLiveRecorder'
 
-DOWNLOADS_DIR = os.path.expanduser('~/Downloads')
-
 LOGGING_FORMATTER_OPTIONS = dict(
     fmt='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%H:%M:%S',
 )
+
+
+DEFAULT_DOWNLOADS_DIR = '~\Downloads' if os.name == 'nt' else '~/Downloads'
+SAMPLE_CONFIG_FILE = '''\
+[DEFAULT]
+# URL of a YouTube livestream, e.g., https://youtube.com/ChinaSNH48/live.
+live_url =
+
+# Default output directory when you don't specify an output file. Must
+# be an absolute path. Supports tilde expansion (i.e., leading ~ is
+# expanded to your home directory).
+downloads_dir = {default_downloads_dir}
+
+# Default output file. If a relative path is given, it is considered
+# relative to the default downloads directory. Also supports tilde
+# expansion.
+output_file =
+
+# Whether to overwrite an existing file. Default is no.
+overwrite = no
+'''.format(default_downloads_dir=DEFAULT_DOWNLOADS_DIR)
+
+
+class Config(object):
+    configFile = ''
+    liveUrl = ''
+    downloadsDir = os.path.expanduser('~/Downloads')
+    outputFile = ''
+    overwrite = False
+
+
+# Raises configparser.Error when config file is corrupted.
+def loadConfig():
+    configDir = appdirs.user_config_dir(APP_NAME)
+    os.makedirs(configDir, exist_ok=True)
+    configFile = os.path.join(configDir, 'defaults.ini')
+    Config.configFile = configFile
+
+    if not os.path.exists(configFile):
+        with open(configFile, 'w') as fp:
+            fp.write(SAMPLE_CONFIG_FILE)
+
+    config = configparser.ConfigParser()
+    with open(configFile) as fp:
+        config.read_file(fp)
+
+    Config.liveUrl = config.get('DEFAULT', 'live_url', fallback='')
+    Config.downloadsDir = config.get('DEFAULT', 'downloads_dir', fallback='')
+    if not os.path.isabs(Config.downloadsDir):
+        Config.downloadsDir = os.path.expanduser(DEFAULT_DOWNLOADS_DIR)
+    Config.outputFile = config.get('DEFAULT', 'output_file', fallback='')
+    if Config.outputFile and not os.path.isabs(Config.outputFile):
+        Config.outputFile = os.path.join(Config.downloadsDir, Config.outputFile)
+    Config.overwrite = config.getboolean('DEFAULT', 'overwrite', fallback=False)
 
 
 class MainWindow(QMainWindow):
@@ -65,6 +119,7 @@ class MainWindow(QMainWindow):
         self.worker = Worker(self)
 
         self.initUI()
+        self.initDefaults()
         self.initSignals()
 
         self.worker.moveToThread(self.thread)
@@ -130,6 +185,27 @@ class MainWindow(QMainWindow):
 
         self.show()
 
+    def initDefaults(self):
+        try:
+            loadConfig()
+        except configparser.Error:
+            QMessageBox.warning(self, 'Warning',
+                                ('Configuration file "%s" is corrupted '
+                                 'and has been moved to a backup.' % Config.configFile))
+            try:
+                os.replace(Config.configFile, '%s.bak' % Config.configFile)
+            except OSError:
+                try:
+                    os.remove(Config.configFile)
+                except OSError:
+                    pass
+            # Write and load the default config
+            loadConfig()
+
+        self.urlInputBox.setText(Config.liveUrl)
+        self.outputFileInputBox.setText(Config.outputFile)
+        self.overwriteCheckbox.setChecked(Config.overwrite)
+
     def initSignals(self):
         self.recording = False
         self.recordingInitiated.connect(self.worker.record)
@@ -143,10 +219,13 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def selectOutputFile(self):
         options = QFileDialog.Options() | QFileDialog.DontConfirmOverwrite
+        currentFilename = self.outputFileInputBox.text()
         filename, _ = QFileDialog.getSaveFileName(
-            self, 'Output file', DOWNLOADS_DIR,
+            self, 'Output file',
+            currentFilename if currentFilename else Config.downloadsDir,
             'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
-        self.outputFileInputBox.setText(filename)
+        if filename:
+            self.outputFileInputBox.setText(filename)
 
     @pyqtSlot()
     def initiateRecording(self):
@@ -196,6 +275,7 @@ class MainWindow(QMainWindow):
         # Wait for recording to stop (max 3 seconds)
         started_waiting = time.time()
         while self.recording and time.time() - started_waiting <= 3:
+            time.sleep(0.01)
             app.processEvents()
         self.thread.quit()
         if not self.thread.wait(3000):
@@ -244,6 +324,7 @@ class Worker(QObject):
             if not recorder.is_alive():
                 break
             app.processEvents()
+            time.sleep(0.01)
 
         if recorder.is_alive():
             # Interrupted by a signal.
@@ -285,7 +366,7 @@ class RecorderProcess(multiprocessing.Process):
     def run(self):
         stream_url, auto_filename_no_ext = self.fetch_stream_info(self.live_url)
         if not self.output_file:
-            self.output_file = os.path.join(DOWNLOADS_DIR, '%s.ts' % auto_filename_no_ext)
+            self.output_file = os.path.join(Config.downloadsDir, '%s.ts' % auto_filename_no_ext)
 
         self.logger.info('Stream URL: %s', stream_url)
         self.logger.info('Output file: %s', self.output_file)
@@ -323,6 +404,7 @@ class RecorderProcess(multiprocessing.Process):
             try:
                 line = output_queue.get_nowait()
             except queue.Empty:
+                time.sleep(0.01)
                 continue
             else:
                 self.conn.send(line)
@@ -356,28 +438,37 @@ class RecorderProcess(multiprocessing.Process):
             fd, path = tempfile.mkstemp()
             with os.fdopen(fd, 'w') as fp:
                 fp.write(json_output)
-            self.logger.error('Failed to decode JSON: %s', err)
+            self.logger.error('Failed to decode JSON output: %s', err)
             self.logger.error('Response recorded to %s', path)
             sys.exit(1)
 
-        # TODO: Guard for KeyError, AttributeError
-        format_id = metadata['format_id']
-        for stream in metadata['formats']:
-            if stream['format_id'] == format_id:
-                stream_url = stream['url']
-                protocol = stream['protocol']
-                if protocol != 'm3u8':
-                    self.logger.warning(
-                        'Unsupported protocol %s; is this really a live stream?', protocol)
-                break
-        else:
-            self.logger.error('format %s not found', format_id)
+        try:
+            format_id = metadata['format_id']
+            for stream in metadata['formats']:
+                if stream['format_id'] == format_id:
+                    stream_url = stream['url']
+                    protocol = stream['protocol']
+                    if protocol != 'm3u8':
+                        self.logger.warning(
+                            'Unsupported protocol %s; is this really a live stream?', protocol)
+                    break
+            else:
+                self.logger.error('format %s not found', format_id)
+                sys.exit(1)
+            auto_filename = metadata['_filename']
+            auto_filename_no_ext = os.path.splitext(os.path.basename(auto_filename))[0]
+        except (TypeError, KeyError):
+            fd, path = tempfile.mkstemp()
+            with os.fdopen(fd, 'w') as fp:
+                fp.write(json_output)
+            self.logger.error('JSON output does not contain the necessary information')
+            self.logger.error('Response recorded to %s', path)
             sys.exit(1)
-        auto_filename = metadata['_filename']
-        auto_filename_no_ext = os.path.splitext(os.path.basename(auto_filename))[0]
+
         return stream_url, auto_filename_no_ext
 
     def record_stream(self, stream_url, output_file, overwrite=False):
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
         ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
                       '-y' if overwrite else '-n', output_file]
         self.log_command(ffmpeg_cmd)

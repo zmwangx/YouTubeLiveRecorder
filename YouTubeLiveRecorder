@@ -389,42 +389,49 @@ class RecorderProcess(multiprocessing.Process):
         msg = msg.replace('%', '%%')
         self.logger.info(msg)
 
-    # Read an output stream (stdout, stderr, or combined) of a
-    # subprocess to depletion, while sending read content to the pipe
-    # line by line, in real time.
+    # Handle output streams (stdout, stderr, or combined) of a
+    # subprocess in real time, line by line, to depletion.
     #
     # The subprocess should be opened with bufsize=1 and
     # universal_newlines=True (text mode, line buffered).
     #
     # Credit: https://stackoverflow.com/a/4896288
-    def pipe_output(self, process, stream):
+    def handle_output(self, process, streams, handlers):
         def queue_up_read(fp, queue):
             for line in fp:
                 queue.put(line)
 
-        output_queue = queue.Queue()
-        output_reader_thread = threading.Thread(
+        output_queues = [queue.Queue() for _ in streams]
+        output_reader_threads = [threading.Thread(
             target=queue_up_read,
             args=(stream, output_queue),
             daemon=True,
-        )
-        output_reader_thread.start()
+        ) for stream, output_queue in zip(streams, output_queues)]
+        for thread in output_reader_threads:
+            thread.start()
 
         while process.poll() is None:
-            try:
-                line = output_queue.get_nowait()
-            except queue.Empty:
+            no_output = True
+            for output_queue, handler in zip(output_queues, handlers):
+                try:
+                    line = output_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    no_output = False
+                    handler(line)
+            if no_output:
                 time.sleep(0.01)
-                continue
-            else:
-                self.conn.send(line)
-        while True:
-            try:
-                line = output_queue.get_nowait()
-            except queue.Empty:
-                break
-            else:
-                self.conn.send(line)
+
+        # Process finished. Process remaining output.
+        for output_queue, handler in zip(output_queues, handlers):
+            while True:
+                try:
+                    line = output_queue.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    handle(line)
 
     def fetch_stream_info(self, live_url):
         ytdl_cmd = ['youtube-dl', '--dump-json', '--youtube-skip-dash-manifest', live_url]
@@ -436,8 +443,10 @@ class RecorderProcess(multiprocessing.Process):
             bufsize=1,
             universal_newlines=True,
         )
-        self.pipe_output(ytdl_process, ytdl_process.stderr)
-        json_output = ytdl_process.stdout.read()
+        ytdl_stdout_lines = []
+        self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
+                           (ytdl_stdout_lines.append, self.conn.send))
+        json_output = ''.join(ytdl_stdout_lines)
         if ytdl_process.returncode != 0:
             self.logger.error('youtube-dl failed with exit status %d', ytdl_process.returncode)
             sys.exit(1)
@@ -492,7 +501,7 @@ class RecorderProcess(multiprocessing.Process):
             bufsize=1,
             universal_newlines=True,
         )
-        self.pipe_output(ffmpeg_process, ffmpeg_process.stdout)
+        self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
         if ffmpeg_process.returncode != 0:
             self.logger.error('ffmpeg failed with exit status %d', ffmpeg_process.returncode)
             sys.exit(1)

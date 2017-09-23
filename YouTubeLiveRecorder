@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
             return
 
         outputFile = self.outputFileInputBox.text()
-        if os.path.exists(outputFile):
+        if os.path.exists(outputFile) and self.overwriteCheckbox.checkState() != Qt.Checked:
             setOverwrite = QMessageBox.question(
                 self, 'Overwrite?', 'The file you selected already exists. Overwrite?',
                 defaultButton=QMessageBox.No,

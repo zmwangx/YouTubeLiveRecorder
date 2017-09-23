@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
         # cursor interaction, unfortunately).
         self.messagesBox.moveCursor(QTextCursor.End)
         self.messagesBox.insertPlainText(message)
+        self.messagesBox.moveCursor(QTextCursor.End)
 
     @pyqtSlot()
     def handleRecordingStopped(self):

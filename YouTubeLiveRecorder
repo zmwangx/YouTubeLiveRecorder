@@ -111,6 +111,16 @@ def loadConfig():
     Config.overwrite = config.getboolean('DEFAULT', 'overwrite', fallback=False)
 
 
+# Fix subprocess popups when running pyinstaller-generated exe on Windows.
+# https://github.com/pyinstaller/pyinstaller/wiki/Recipe-subprocess
+def subprocess_startupinfo():
+    if WINDOWS and hasattr(subprocess, 'STARTUPINFO'):
+        si = subprocess.STARTUPINFO
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        return si
+    else:
+        return None
+
 class MainWindow(QMainWindow):
 
     recordingInitiated = pyqtSignal(str, str, bool)
@@ -125,6 +135,9 @@ class MainWindow(QMainWindow):
         self.initUI()
         self.initDefaults()
         self.initSignals()
+
+        self.checkDependency('youtube-dl')
+        self.checkDependency('ffmpeg')
 
         self.worker.moveToThread(self.thread)
         self.thread.start()
@@ -226,6 +239,14 @@ class MainWindow(QMainWindow):
         self.recording = False
         self.recordingInitiated.connect(self.worker.record)
         self.recordingCanceled.connect(self.worker.stop)
+
+    def checkDependency(self, executable):
+        try:
+            proc = subprocess.Popen(executable, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    startupinfo=subprocess_startupinfo())
+            proc.kill()
+        except (OSError, subprocess.SubprocessError):
+            QMessageBox.critical(self, 'Critical', 'Cannot find a usable %s.' % executable)
 
     def closeEvent(self, event):
         self.settings.setValue('geometry', self.saveGeometry())
@@ -404,17 +425,6 @@ class RecorderProcess(multiprocessing.Process):
 
         self.conn.close()
 
-    # Fix subprocess popups when running pyinstaller-generated exe on Windows.
-    # https://github.com/pyinstaller/pyinstaller/wiki/Recipe-subprocess
-    @staticmethod
-    def startupinfo():
-        if WINDOWS and hasattr(subprocess, 'STARTUPINFO'):
-            si = subprocess.STARTUPINFO
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            return si
-        else:
-            return None
-
     def log_command(self, cmd):
         msg = ' '.join(shlex.quote(arg) for arg in cmd)
         msg = msg.replace('%', '%%')
@@ -475,7 +485,7 @@ class RecorderProcess(multiprocessing.Process):
                 stderr=subprocess.PIPE,
                 bufsize=1,
                 universal_newlines=True,
-                startupinfo=self.startupinfo(),
+                startupinfo=subprocess_startupinfo(),
             )
             ytdl_stdout_lines = []
             self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
@@ -540,7 +550,7 @@ class RecorderProcess(multiprocessing.Process):
                 stderr=subprocess.STDOUT,
                 bufsize=1,
                 universal_newlines=True,
-                startupinfo=self.startupinfo(),
+                startupinfo=subprocess_startupinfo(),
             )
             self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
         except (OSError, subprocess.SubprocessError):

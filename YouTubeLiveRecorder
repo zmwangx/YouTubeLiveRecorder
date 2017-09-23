@@ -467,18 +467,24 @@ class RecorderProcess(multiprocessing.Process):
     def fetch_stream_info(self, live_url):
         ytdl_cmd = ['youtube-dl', '--dump-json', '--youtube-skip-dash-manifest', live_url]
         self.log_command(ytdl_cmd)
-        ytdl_process = subprocess.Popen(
-            ytdl_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1,
-            universal_newlines=True,
-            startupinfo=self.startupinfo(),
-        )
-        ytdl_stdout_lines = []
-        self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
+        try:
+            ytdl_process = None
+            ytdl_process = subprocess.Popen(
+                ytdl_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+                universal_newlines=True,
+                startupinfo=self.startupinfo(),
+            )
+            ytdl_stdout_lines = []
+            self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
                            (ytdl_stdout_lines.append, self.conn.send))
-        json_output = ''.join(ytdl_stdout_lines)
+            json_output = ''.join(ytdl_stdout_lines)
+        except (OSError, subprocess.SubprocessError):
+            if not ytdl_process:
+                self.logger.error('Failed to start youtube-dl')
+                sys.exit(1)
         if ytdl_process.returncode != 0:
             self.logger.error('youtube-dl failed with exit status %d', ytdl_process.returncode)
             sys.exit(1)
@@ -526,15 +532,21 @@ class RecorderProcess(multiprocessing.Process):
         ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
                       '-y' if overwrite else '-n', output_file]
         self.log_command(ffmpeg_cmd)
-        ffmpeg_process = subprocess.Popen(
-            ffmpeg_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            universal_newlines=True,
-            startupinfo=self.startupinfo(),
-        )
-        self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
+        try:
+            ffmpeg_process = None
+            ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
+                universal_newlines=True,
+                startupinfo=self.startupinfo(),
+            )
+            self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
+        except (OSError, subprocess.SubprocessError):
+            if not ffmpeg_process:
+                self.logger.error('Failed to start ffmpeg')
+                sys.exit(1)
         if ffmpeg_process.returncode != 0:
             self.logger.error('ffmpeg failed with exit status %d', ffmpeg_process.returncode)
             sys.exit(1)

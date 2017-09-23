@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         messagesBox = QTextEdit(self, readOnly=True, styleSheet='font-family: monospaced')
         messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
 
-        configurationInfoLabel = QLabel('Customize your defaults by editing configuration file:')
+        configurationInfoLabel = QLabel('Customize your defaults by editing the configuration file:')
         configurationOpenButton = QPushButton('Open', maximumWidth=75)
 
         configurationLineLayout = QHBoxLayout()

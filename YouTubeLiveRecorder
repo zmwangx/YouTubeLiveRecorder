@@ -5,6 +5,7 @@ import json
 import logging
 import multiprocessing
 import os
+import platform
 import queue
 import shlex
 import sys
@@ -55,8 +56,8 @@ LOGGING_FORMATTER_OPTIONS = dict(
     datefmt='%H:%M:%S',
 )
 
-
-DEFAULT_DOWNLOADS_DIR = '~\Downloads' if os.name == 'nt' else '~/Downloads'
+WINDOWS = platform.system() == 'Windows'
+DEFAULT_DOWNLOADS_DIR = '~\Downloads' if WINDOWS else '~/Downloads'
 SAMPLE_CONFIG_FILE = '''\
 [DEFAULT]
 # URL of a YouTube livestream, e.g., https://youtube.com/ChinaSNH48/live.
@@ -403,6 +404,17 @@ class RecorderProcess(multiprocessing.Process):
 
         self.conn.close()
 
+    # Fix subprocess popups when running pyinstaller-generated exe on Windows.
+    # https://github.com/pyinstaller/pyinstaller/wiki/Recipe-subprocess
+    @staticmethod
+    def startupinfo():
+        if WINDOWS and hasattr(subprocess, 'STARTUPINFO'):
+            si = subprocess.STARTUPINFO
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            return si
+        else:
+            return None
+
     def log_command(self, cmd):
         msg = ' '.join(shlex.quote(arg) for arg in cmd)
         msg = msg.replace('%', '%%')
@@ -461,6 +473,7 @@ class RecorderProcess(multiprocessing.Process):
             stderr=subprocess.PIPE,
             bufsize=1,
             universal_newlines=True,
+            startupinfo=self.startupinfo(),
         )
         ytdl_stdout_lines = []
         self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
@@ -519,6 +532,7 @@ class RecorderProcess(multiprocessing.Process):
             stderr=subprocess.STDOUT,
             bufsize=1,
             universal_newlines=True,
+            startupinfo=self.startupinfo(),
         )
         self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
         if ffmpeg_process.returncode != 0:
@@ -598,6 +612,7 @@ class PipingLogger(object):
 
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     window = MainWindow()
     app.aboutToQuit.connect(window.cleanUp)
     sys.exit(app.exec_())

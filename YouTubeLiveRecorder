@@ -295,11 +295,26 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def printMessage(self, message):
+        box = self.messagesBox
+        scrollBar = box.verticalScrollBar()
+
+        currentScroll = scrollBar.value()
+        # Record whether user scrolled back in order to decide whether
+        # to maintain the current scroll position after inserting new
+        # content.
+        userScrolledBack = currentScroll != scrollBar.maximum()
+
         # Make sure the cursor is at the end (readOnly does not disable
         # cursor interaction, unfortunately).
-        self.messagesBox.moveCursor(QTextCursor.End)
-        self.messagesBox.insertPlainText(message)
-        self.messagesBox.moveCursor(QTextCursor.End)
+        box.moveCursor(QTextCursor.End)
+        box.insertPlainText(message)
+        box.moveCursor(QTextCursor.End)
+
+        if userScrolledBack:
+            scrollBar.setValue(currentScroll)
+        else:
+            scrollBar.setValue(scrollBar.maximum())
+
 
     @pyqtSlot()
     def handleRecordingStopped(self):

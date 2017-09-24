@@ -251,8 +251,13 @@ class MainWindow(QMainWindow):
 
     def checkDependency(self, executable):
         try:
-            proc = subprocess.Popen(executable, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    startupinfo=subprocess_startupinfo())
+            proc = subprocess.Popen(
+                executable,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                startupinfo=subprocess_startupinfo()
+            )
             proc.kill()
         except (OSError, subprocess.SubprocessError):
             QMessageBox.critical(self, 'Critical', 'Cannot find a usable %s.' % executable)
@@ -546,6 +551,7 @@ class RecorderProcess(multiprocessing.Process):
             ytdl_process = None
             ytdl_process = subprocess.Popen(
                 ytdl_cmd,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=1,
@@ -611,6 +617,7 @@ class RecorderProcess(multiprocessing.Process):
             ffmpeg_process = None
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=1,

@@ -1,7 +1,7 @@
 # YouTube Live Recorder
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?maxAge=2592000)](COPYING)
-![Supported Python Versions: 3.4, 3.5, 3.6, 3.7](https://img.shields.io/badge/python-3.4,%203.5,%203.6,%203.7-blue.svg?maxAge=2592000)
+![Supported Python Versions: 3.6, 3.7](https://img.shields.io/badge/python-3.6,%203.7-blue.svg?maxAge=2592000)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 
 ## Development
 
-With Python 3.4 or later,
+With Python 3.6 or later,
 
 ```sh
 python3 -m venv venv

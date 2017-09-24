@@ -52,6 +52,8 @@ from PyQt5.QtWidgets import (
 APP_AUTHOR = 'Zhiming Wang'
 APP_AUTHOR_DOMAIN = 'zhimingwang.org'
 APP_NAME = 'YouTubeLiveRecorder'
+APP_VERSION = 'v0.1a2.dev'
+APP_TITLE = 'YouTube Live Recorder %s' % APP_VERSION
 
 app = QApplication(sys.argv)
 app.setOrganizationName(APP_AUTHOR)
@@ -157,7 +159,7 @@ class MainWindow(QMainWindow):
         self.restoreGeometry(self.settings.value('geometry', b''))
         self.restoreState(self.settings.value('windowState', b''))
 
-        self.setWindowTitle('YouTube Live Recorder')
+        self.setWindowTitle(APP_TITLE)
 
         urlInputLabel = QLabel('Live URL:')
         urlInputBox = QLineEdit(self, placeholderText='https://youtube.com/ChinaSNH48/live')

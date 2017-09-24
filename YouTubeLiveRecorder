@@ -46,10 +46,14 @@ from PyQt5.QtWidgets import (
 )
 
 
-app = QApplication(sys.argv)
-
-APP_AUTHOR = 'org.zhimingwang'
+APP_AUTHOR = 'Zhiming Wang'
+APP_AUTHOR_DOMAIN = 'zhimingwang.org'
 APP_NAME = 'YouTubeLiveRecorder'
+
+app = QApplication(sys.argv)
+app.setOrganizationName(APP_AUTHOR)
+app.setOrganizationDomain(APP_AUTHOR_DOMAIN)
+app.setApplicationName(APP_NAME)
 
 LOGGING_FORMATTER_OPTIONS = dict(
     fmt='%(asctime)s [%(levelname)s] %(message)s',
@@ -146,7 +150,7 @@ class MainWindow(QMainWindow):
         self.resize(500, 400)
         self.setMinimumSize(400, 250)
 
-        self.settings = QSettings(APP_AUTHOR, APP_NAME)
+        self.settings = QSettings()
         self.restoreGeometry(self.settings.value('geometry', b''))
         self.restoreState(self.settings.value('windowState', b''))
 

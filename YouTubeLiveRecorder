@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
 import configparser
+import enum
 import json
+import html
 import logging
 import multiprocessing
 import os
 import platform
 import queue
+import re
 import shlex
 import sys
 import subprocess
@@ -297,6 +300,44 @@ class MainWindow(QMainWindow):
     def cancelRecording(self):
         self.recordingCanceled.emit()
 
+    _logMessageStructure = re.compile(
+        r'^(?P<time>\d{2}:\d{2}:\d{2}) '
+        r'\[(?P<level>CRITICAL|ERROR|WARNING|INFO|DEBUG|NOTSET)\]'
+        r'(?P<body>.*)$',
+    )
+
+    _levelToColor = dict(
+        CRITICAL='red',
+        ERROR='red',
+        WARNING='orange',
+        INFO='green',
+        DEBUG='magenta',
+    )
+
+    # Returns an array of tuples (type, text) where type is a Printable.*.
+    #
+    # Assumes the message is a single line (with or without newline).
+    @classmethod
+    def parseMessage(cls, message):
+        m = cls._logMessageStructure.match(message)
+        if m:
+            time = m.group('time')
+            level = m.group('level')
+            message_body = m.group('body')
+            htmltext = ('<span style="color:blue">{time}</span> '
+                        '<span style="color:{levelcolor}"><b>[{level}]</b> {message_body}</span>'
+                        # Insert a dummy space to force QTextEdit to restore color.
+                        '<span style="color:initial">&nbsp;</span>'.format(
+                            time=time, levelcolor=cls._levelToColor[level], level=level,
+                            message_body=html.escape(message_body),
+                        ))
+            if message.endswith('\n'):
+                return [(Printable.HTML, htmltext), (Printable.PLAIN, '\n')]
+            else:
+                return [(Printable.HTML, htmltext)]
+        else:
+            return [(Printable.PLAIN, message)]
+
     @pyqtSlot(str)
     def printMessage(self, message):
         box = self.messagesBox
@@ -311,7 +352,11 @@ class MainWindow(QMainWindow):
         # Make sure the cursor is at the end (readOnly does not disable
         # cursor interaction, unfortunately).
         box.moveCursor(QTextCursor.End)
-        box.insertPlainText(message)
+        for type_, text in self.parseMessage(message):
+            if type_ == Printable.HTML:
+                box.insertHtml(text)
+            else:  # Printable.PLAIN
+                box.insertPlainText(text)
         box.moveCursor(QTextCursor.End)
 
         if userScrolledBack:
@@ -438,7 +483,6 @@ class RecorderProcess(multiprocessing.Process):
         if not self.output_file:
             self.output_file = os.path.join(Config.downloadsDir, '%s.ts' % auto_filename_no_ext)
 
-        self.logger.info('Stream URL: %s', stream_url)
         self.logger.info('Output file: %s', self.output_file)
         self.record_stream(stream_url, self.output_file, overwrite=self.overwrite)
 
@@ -579,6 +623,11 @@ class RecorderProcess(multiprocessing.Process):
         if ffmpeg_process.returncode != 0:
             self.logger.error('ffmpeg failed with exit status %d', ffmpeg_process.returncode)
             sys.exit(1)
+
+
+class Printable(enum.Enum):
+    PLAIN = 0
+    HTML = 1
 
 
 class SignalEmittingHandler(logging.Handler):

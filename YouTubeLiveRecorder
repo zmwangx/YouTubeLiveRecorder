@@ -535,7 +535,7 @@ class RecorderProcess(multiprocessing.Process):
                 time.sleep(0.01)
 
         # Process finished. Process remaining output.
-        for output_queue, handler in zip(output_queues, handlers):
+        for output_queue, handle in zip(output_queues, handlers):
             while True:
                 try:
                     line = output_queue.get_nowait()

@@ -560,7 +560,7 @@ class RecorderProcess(multiprocessing.Process):
             )
             ytdl_stdout_lines = []
             self.handle_output(ytdl_process, (ytdl_process.stdout, ytdl_process.stderr),
-                           (ytdl_stdout_lines.append, self.conn.send))
+                               (ytdl_stdout_lines.append, self.conn.send))
             json_output = ''.join(ytdl_stdout_lines)
         except (OSError, subprocess.SubprocessError):
             if not ytdl_process:

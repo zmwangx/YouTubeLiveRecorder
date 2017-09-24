@@ -88,36 +88,12 @@ overwrite = no
 
 
 class Config(object):
-    configFile = ''
-    liveUrl = ''
-    downloadsDir = os.path.expanduser('~/Downloads')
-    outputFile = ''
-    overwrite = False
 
-
-# Raises configparser.Error when config file is corrupted.
-def loadConfig():
-    configDir = appdirs.user_config_dir(APP_NAME)
-    os.makedirs(configDir, exist_ok=True)
-    configFile = os.path.join(configDir, 'defaults.ini')
-    Config.configFile = configFile
-
-    if not os.path.exists(configFile):
-        with open(configFile, 'w') as fp:
-            fp.write(SAMPLE_CONFIG_FILE)
-
-    config = configparser.ConfigParser()
-    with open(configFile) as fp:
-        config.read_file(fp)
-
-    Config.liveUrl = config.get('DEFAULT', 'live_url', fallback='')
-    Config.downloadsDir = config.get('DEFAULT', 'downloads_dir', fallback='')
-    if not os.path.isabs(Config.downloadsDir):
-        Config.downloadsDir = os.path.expanduser(DEFAULT_DOWNLOADS_DIR)
-    Config.outputFile = config.get('DEFAULT', 'output_file', fallback='')
-    if Config.outputFile and not os.path.isabs(Config.outputFile):
-        Config.outputFile = os.path.join(Config.downloadsDir, Config.outputFile)
-    Config.overwrite = config.getboolean('DEFAULT', 'overwrite', fallback=False)
+    def __init__(self):
+        self.liveUrl = ''
+        self.downloadsDir = DEFAULT_DOWNLOADS_DIR
+        self.outputFile = ''
+        self.overwrite = False
 
 
 # Fix subprocess popups when running pyinstaller-generated exe on Windows.
@@ -234,26 +210,56 @@ class MainWindow(QMainWindow):
 
         self.show()
 
+    # Raises configparser.Error when config file is corrupted.
+    def loadConfig(self):
+        self.config = Config()
+
+        configDir = appdirs.user_config_dir(APP_NAME)
+        os.makedirs(configDir, exist_ok=True)
+        self.configFile = os.path.join(configDir, 'defaults.ini')
+
+        if not os.path.exists(self.configFile):
+            with open(self.configFile, 'w') as fp:
+                fp.write(SAMPLE_CONFIG_FILE)
+
+        config = configparser.ConfigParser()
+        with open(self.configFile) as fp:
+            config.read_file(fp)
+
+        self.config.liveUrl = config.get('DEFAULT', 'live_url', fallback='')
+        self.config.downloadsDir = os.path.expanduser(config.get('DEFAULT', 'downloads_dir',
+                                                                 fallback=DEFAULT_DOWNLOADS_DIR))
+        if not os.path.isabs(self.config.downloadsDir):
+            QMessageBox.warning(self, 'Warning',
+                                'Default downloads directory "%s" from your configuration file '
+                                'is not absolute, hence ignored. Please check your configuration.'
+                                % self.config.downloadsDir)
+            self.config.downloadsDir = os.path.expanduser(DEFAULT_DOWNLOADS_DIR)
+        self.config.outputFile = config.get('DEFAULT', 'output_file', fallback='')
+        if self.config.outputFile and not os.path.isabs(self.config.outputFile):
+            self.config.outputFile = os.path.join(self.config.downloadsDir, self.config.outputFile)
+        self.config.overwrite = config.getboolean('DEFAULT', 'overwrite', fallback=False)
+
     def initDefaults(self):
         try:
-            loadConfig()
+            self.loadConfig()
         except configparser.Error:
             QMessageBox.warning(self, 'Warning',
                                 ('Configuration file "%s" is corrupted '
-                                 'and has been moved to a backup.' % Config.configFile))
+                                 'and has been moved to a backup.' % self.configFile))
             try:
-                os.replace(Config.configFile, '%s.bak' % Config.configFile)
+                os.replace(self.configFile, '%s.bak' % self.configFile)
             except OSError:
                 try:
-                    os.remove(Config.configFile)
+                    os.remove(self.configFile)
                 except OSError:
                     pass
             # Write and load the default config
-            loadConfig()
+            self.loadConfig()
 
-        self.urlInputBox.setText(Config.liveUrl)
-        self.outputFileInputBox.setText(Config.outputFile)
-        self.overwriteCheckbox.setChecked(Config.overwrite)
+        self.urlInputBox.setText(self.config.liveUrl)
+        self.outputFileInputBox.setText(self.config.outputFile)
+        self.overwriteCheckbox.setChecked(self.config.overwrite)
 
     def initSignals(self):
         self.recording = False
@@ -284,7 +290,7 @@ class MainWindow(QMainWindow):
         currentFilename = self.outputFileInputBox.text()
         filename, _ = QFileDialog.getSaveFileName(
             self, 'Output file',
-            currentFilename if currentFilename else Config.downloadsDir,
+            currentFilename if currentFilename else self.config.downloadsDir,
             'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
         if filename:
             self.outputFileInputBox.setText(filename)
@@ -306,6 +312,20 @@ class MainWindow(QMainWindow):
                 self.overwriteCheckbox.setChecked(True)
             else:
                 return
+
+        if not outputFile:
+            try:
+                os.makedirs(self.config.downloadsDir, exist_ok=True)
+            except OSError:
+                QMessageBox.critical(
+                    self, 'Error',
+                    'Cannot create output directory "%s". '
+                    'Please change your default downloads directory in your configuration file, '
+                    'or select an output file.' % self.config.downloadsDir)
+                return
+            else:
+                # Set outputFile to the output directory, leaving the filename undetermined.
+                outputFile = self.config.downloadsDir
 
         overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
 
@@ -382,7 +402,6 @@ class MainWindow(QMainWindow):
         else:
             scrollBar.setValue(scrollBar.maximum())
 
-
     @pyqtSlot()
     def handleRecordingStopped(self):
         self.recording = False
@@ -391,7 +410,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def openConfigFile(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(Config.configFile))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.configFile))
 
     @pyqtSlot()
     def cleanUp(self):
@@ -484,6 +503,7 @@ class Worker(QObject):
 # We use snake case for the Qt-free part. Camel case is gross.
 class RecorderProcess(multiprocessing.Process):
 
+    # If output_file is a directory, let youtube-dl determine the filename.
     # conn is the sending end of a multiprocessing.Pipe.
     def __init__(self, live_url, output_file, overwrite, conn):
         super().__init__()
@@ -498,8 +518,8 @@ class RecorderProcess(multiprocessing.Process):
 
     def run(self):
         stream_url, auto_filename_no_ext = self.fetch_stream_info(self.live_url)
-        if not self.output_file:
-            self.output_file = os.path.join(Config.downloadsDir, '%s.ts' % auto_filename_no_ext)
+        if os.path.isdir(self.output_file):
+            self.output_file = os.path.join(self.output_file, '%s.ts' % auto_filename_no_ext)
 
         self.logger.info('Output file: %s', self.output_file)
         self.record_stream(stream_url, self.output_file, overwrite=self.overwrite)
@@ -618,7 +638,12 @@ class RecorderProcess(multiprocessing.Process):
         return stream_url, auto_filename_no_ext
 
     def record_stream(self, stream_url, output_file, overwrite=False):
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        try:
+            output_dir = os.path.dirname(output_file)
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError:
+            self.logger.error('Failed to create directory "%s"' % output_dir)
+            sys.exit(1)
         ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
                       '-y' if overwrite else '-n', output_file]
         self.log_command(ffmpeg_cmd)

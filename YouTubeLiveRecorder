@@ -34,8 +34,10 @@ from PyQt5.QtGui import (
     QTextOption,
 )
 from PyQt5.QtWidgets import (
+    QAction,
     QApplication,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -45,6 +47,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTextEdit,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -54,6 +57,20 @@ APP_AUTHOR_DOMAIN = 'zhimingwang.org'
 APP_NAME = 'YouTubeLiveRecorder'
 APP_VERSION = 'v0.1a4'
 APP_TITLE = 'YouTube Live Recorder %s' % APP_VERSION
+ABOUT = '''
+<b>YouTube Live Recorder</b> {appVersion}
+<hr>
+Author: <a href="https://github.com/zmwangx">Zhiming Wang</a><br>
+Contact: <a href="mailto:zmwangx@gmail.com">zmwangx@gmail.com</a><br>
+License: <a href="https://opensource.org/licenses/MIT">MIT</a><br>
+Source: <a href="https://github.com/zmwangx/YouTubeLiveRecorder">https://git.io/YTLR</a><br>
+Bug reports:
+<a href="https://github.com/zmwangx/YouTubeLiveRecorder/issues">https://git.io/YTLR-bugs</a>
+<hr>
+youtube-dl version: {{ytdlVersion}}<br>
+FFmpeg version: {{ffmpegVersion}}
+'''.format(appVersion=APP_VERSION)
+
 
 app = QApplication(sys.argv)
 app.setOrganizationName(APP_AUTHOR)
@@ -85,6 +102,8 @@ output_file =
 # Whether to overwrite an existing file. Default is no.
 overwrite = no
 '''.format(default_downloads_dir=DEFAULT_DOWNLOADS_DIR)
+
+NOT_READY = object()
 
 
 class Config(object):
@@ -132,11 +151,12 @@ class MainWindow(QMainWindow):
         self.initDefaults()
         self.initSignals()
 
-        self.checkDependency('youtube-dl')
-        self.checkDependency('ffmpeg')
+        self.checkDeps()
 
         self.worker.moveToThread(self.thread)
         self.thread.start()
+
+        self.aboutWindow = None
 
     def initUI(self):
         self.resize(500, 400)
@@ -147,6 +167,13 @@ class MainWindow(QMainWindow):
         self.restoreState(self.settings.value('windowState', b''))
 
         self.setWindowTitle(APP_TITLE)
+
+        openAboutWindowAction = QAction('&About', self)
+        openAboutWindowAction.triggered.connect(self.openAboutWindow)
+
+        menubar = self.menuBar()
+        configurationMenu = menubar.addMenu('&Configuration')
+        configurationMenu.addAction(openAboutWindowAction)
 
         urlInputLabel = QLabel('Live URL:')
         urlInputBox = QLineEdit(self, placeholderText='https://youtube.com/ChinaSNH48/live')
@@ -267,23 +294,52 @@ class MainWindow(QMainWindow):
         self.recordingInitiated.connect(self.worker.record)
         self.recordingCanceled.connect(self.worker.stop)
 
-    def checkDependency(self, executable):
-        try:
-            proc = subprocess.Popen(
-                executable,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                **standard_subprocess_kwargs(),
-            )
-            proc.kill()
-        except (OSError, subprocess.SubprocessError):
-            QMessageBox.critical(self, 'Critical', 'Cannot find a usable %s.' % executable)
+    def checkDeps(self):
+        self.ytdlVersion = NOT_READY
+        self.ffmpegVersion = NOT_READY
+
+        def extractYtdlVersion(stdout):
+            version = stdout.strip()
+            return version if version else None
+
+        def extractFFmpegVersion(stdout):
+            m = re.match(r'^ffmpeg version (?P<version>\d+(\.\d+)+)', stdout)
+            if m:
+                return m.group('version')
+            else:
+                return None
+
+        self.depCheckerThreads = [
+            DepChecker(self, 'youtube-dl', ('youtube-dl', '--version'), extractYtdlVersion),
+            DepChecker(self, 'ffmpeg', ('ffmpeg', '-version'), extractFFmpegVersion),
+        ]
+        for thread in self.depCheckerThreads:
+            thread.start()
 
     def closeEvent(self, event):
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('windowState', self.saveState())
         super().closeEvent(event)
+
+    @pyqtSlot()
+    def openAboutWindow(self):
+        if self.aboutWindow is None:
+            self.aboutWindow = AboutWindow(self)
+        self.aboutWindow.show()
+        self.aboutWindow.activateWindow()
+        self.aboutWindow.raise_()
+
+    @pyqtSlot(str, str)
+    def setDepVersion(self, dep, version):
+        if not version:
+            version = None
+            QMessageBox.critical(self, 'Critical', 'Cannot find a usable %s.' % dep)
+        if dep == 'youtube-dl':
+            self.ytdlVersion = version
+        elif dep == 'ffmpeg':
+            self.ffmpegVersion = version
+        else:
+            pass
 
     @pyqtSlot()
     def selectOutputFile(self):
@@ -417,13 +473,91 @@ class MainWindow(QMainWindow):
     def cleanUp(self):
         self.recordingCanceled.emit()
         # Wait for recording to stop (max 3 seconds)
-        started_waiting = time.time()
-        while self.recording and time.time() - started_waiting <= 3:
+        startedWaiting = time.time()
+        while self.recording and time.time() - startedWaiting <= 3:
             time.sleep(0.01)
             app.processEvents()
         self.thread.quit()
+        for thread in self.depCheckerThreads:
+            thread.quit()
         if not self.thread.wait(3000):
             self.thread.terminate()
+
+
+class AboutWindow(QDialog):
+
+    def __init__(self, mainWindow):
+        super().__init__(mainWindow)
+        self.mainWindow = mainWindow
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('About')
+
+        main = self.mainWindow
+        # Wait for dep versions (max 5 seconds)
+        startedWaiting = time.time()
+        while ((main.ytdlVersion == NOT_READY or main.ffmpegVersion == NOT_READY)
+               and time.time() - startedWaiting <= 5):
+            time.sleep(0.01)
+            app.processEvents()
+
+        errorMessage = '<span style="color:#999">not found or unusable</span>'
+        about = ABOUT.format(
+            ytdlVersion=main.ytdlVersion if main.ytdlVersion is not None else errorMessage,
+            ffmpegVersion=main.ffmpegVersion if main.ffmpegVersion is not None else errorMessage,
+        )
+        aboutLabel = QLabel(about)
+        aboutLabel.setTextFormat(Qt.RichText)
+        aboutLabel.setOpenExternalLinks(True)
+
+        layout = QVBoxLayout()
+        layout.addWidget(aboutLabel)
+        self.setLayout(layout)
+
+
+class DepChecker(QThread):
+
+    depChecked = pyqtSignal(str, str)
+
+    def __init__(self, gui, dep, command, outputProcessor):
+        super().__init__()
+        self.gui = gui
+        self.dep = dep
+        self.command = command
+        self.outputProcessor = outputProcessor
+        self.initSignals()
+
+    def initSignals(self):
+        self.depChecked.connect(self.gui.setDepVersion)
+
+    def sendVersion(self, version):
+        self.depChecked.emit(self.dep, '' if version is None else version)
+
+    def run(self):
+        try:
+            proc = subprocess.Popen(
+                self.command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                **standard_subprocess_kwargs(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            self.sendVersion(None)
+            return
+
+        try:
+            stdout, _ = proc.communicate(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        if proc.returncode != 0:
+            self.sendVersion(None)
+            return
+
+        version = self.outputProcessor(stdout)
+        self.sendVersion(version)
 
 
 class Worker(QObject):

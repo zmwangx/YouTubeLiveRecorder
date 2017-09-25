@@ -1,0 +1,6 @@
+[MESSAGES CONTROL]
+disable=R,C,attribute-defined-outside-init
+ignored-modules=PyQt5.QtCore,PyQt5.QtGui,PyQt5.QtWidgets
+
+[REPORTS]
+score=no

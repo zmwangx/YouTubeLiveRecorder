@@ -66,7 +66,7 @@ LOGGING_FORMATTER_OPTIONS = dict(
 )
 
 WINDOWS = platform.system() == 'Windows'
-DEFAULT_DOWNLOADS_DIR = '~\Downloads' if WINDOWS else '~/Downloads'
+DEFAULT_DOWNLOADS_DIR = r'~\Downloads' if WINDOWS else '~/Downloads'
 SAMPLE_CONFIG_FILE = '''\
 [DEFAULT]
 # URL of a YouTube livestream, e.g., https://youtube.com/ChinaSNH48/live.
@@ -170,7 +170,8 @@ class MainWindow(QMainWindow):
         messagesBox = QTextEdit(self, readOnly=True, styleSheet='font-family: monospaced')
         messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
 
-        configurationInfoLabel = QLabel('Customize your defaults by editing the configuration file:')
+        configurationInfoLabel = QLabel(
+            'Customize your defaults by editing the configuration file:')
         configurationOpenButton = QPushButton('Open', maximumWidth=75)
 
         configurationLineLayout = QHBoxLayout()
@@ -359,14 +360,14 @@ class MainWindow(QMainWindow):
     def parseMessage(cls, message):
         m = cls._logMessageStructure.match(message)
         if m:
-            time = m.group('time')
+            time_ = m.group('time')
             level = m.group('level')
             message_body = m.group('body')
             htmltext = ('<span style="color:blue">{time}</span> '
                         '<span style="color:{levelcolor}"><b>[{level}]</b> {message_body}</span>'
                         # Insert a dummy space to force QTextEdit to restore color.
                         '<span style="color:initial">&nbsp;</span>'.format(
-                            time=time, levelcolor=cls._levelToColor[level], level=level,
+                            time=time_, levelcolor=cls._levelToColor[level], level=level,
                             message_body=html.escape(message_body),
                         ))
             if message.endswith('\n'):
@@ -481,7 +482,7 @@ class Worker(QObject):
             procs.append(parent)
             for proc in procs:
                 proc.terminate()
-            gone, alive = psutil.wait_procs(procs, timeout=1)
+            _, alive = psutil.wait_procs(procs, timeout=1)
             for proc in alive:
                 proc.kill()
         else:
@@ -539,9 +540,9 @@ class RecorderProcess(multiprocessing.Process):
     #
     # Credit: https://stackoverflow.com/a/4896288
     def handle_output(self, process, streams, handlers):
-        def queue_up_read(fp, queue):
+        def queue_up_read(fp, queue_):
             for line in fp:
-                queue.put(line)
+                queue_.put(line)
 
         output_queues = [queue.Queue() for _ in streams]
         output_reader_threads = [threading.Thread(
@@ -688,8 +689,8 @@ class SignalEmittingHandler(logging.Handler):
 # logging.getLogger), since on macOS, using the logger (e.g. calling
 # logger.info) inside the forked process causes an error:
 #
-#   The process has forked and you cannot use this CoreFoundation functionality safely. You MUST exec().
-#   Break on __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__() to debug.
+#   The process has forked and you cannot use this CoreFoundation functionality safely. You MUST exec().  # noqa
+#   Break on __THE_PROCESS_HAS_FORKED_AND_YOU_CANNOT_USE_THIS_COREFOUNDATION_FUNCTIONALITY___YOU_MUST_EXEC__() to debug.  # noqa
 #
 # Possibly due to root logger interactions (just my guess).
 
@@ -732,6 +733,7 @@ class PipingLogger(object):
 
     # kwargs are ignored.
     def log(self, level, msg, *args, **kwargs):
+        # pylint: disable=unused-argument
         if level < self.level:
             return
         record = dict(

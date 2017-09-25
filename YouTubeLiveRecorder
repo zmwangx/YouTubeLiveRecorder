@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import configparser
 import enum
 import json
 import html
@@ -17,19 +16,16 @@ import tempfile
 import threading
 import time
 
-import appdirs
 import psutil
 from PyQt5.QtCore import (
     Qt,
     QObject,
     QSettings,
     QThread,
-    QUrl,
     pyqtSignal,
     pyqtSlot,
 )
 from PyQt5.QtGui import (
-    QDesktopServices,
     QTextCursor,
     QTextOption,
 )
@@ -85,25 +81,8 @@ LOGGING_FORMATTER_OPTIONS = dict(
 )
 
 WINDOWS = platform.system() == 'Windows'
-DEFAULT_DOWNLOADS_DIR = r'~\Downloads' if WINDOWS else '~/Downloads'
-SAMPLE_CONFIG_FILE = '''\
-[DEFAULT]
-# URL of a YouTube livestream, e.g., https://youtube.com/ChinaSNH48/live.
-live_url =
 
-# Default output directory when you don't specify an output file. Must
-# be an absolute path. Supports tilde expansion (i.e., leading ~ is
-# expanded to your home directory).
-downloads_dir = {default_downloads_dir}
-
-# Default output file. If a relative path is given, it is considered
-# relative to the default downloads directory. Also supports tilde
-# expansion.
-output_file =
-
-# Whether to overwrite an existing file. Default is no.
-overwrite = no
-'''.format(default_downloads_dir=DEFAULT_DOWNLOADS_DIR)
+DEFAULT_DOWNLOADS_DIR = os.path.expanduser(r'~\Downloads' if WINDOWS else '~/Downloads')
 
 NOT_READY = object()
 
@@ -204,17 +183,7 @@ class MainWindow(QMainWindow):
         messagesBox = QTextEdit(self, readOnly=True, styleSheet='font-family: monospaced')
         messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
 
-        configurationInfoLabel = QLabel(
-            'Customize your defaults by editing the configuration file:')
-        configurationOpenButton = QPushButton('Open', maximumWidth=75)
-
-        configurationLineLayout = QHBoxLayout()
-        configurationLineLayout.setContentsMargins(0, 0, 0, 0)
-        configurationLineLayout.addWidget(configurationInfoLabel)
-        configurationLineLayout.addWidget(configurationOpenButton)
-
         mainLayout = QGridLayout(spacing=8)
-        mainLayout.setContentsMargins(15, 15, 15, 5)  # Reduce bottom margin
         mainLayout.addWidget(urlInputLabel, 0, 0)
         mainLayout.addWidget(urlInputBox, 0, 1, 1, 2)
         mainLayout.addWidget(outputFileInputLabel, 1, 0)
@@ -224,7 +193,6 @@ class MainWindow(QMainWindow):
         mainLayout.addWidget(overwriteCheckbox, 2, 1)
         mainLayout.addLayout(buttonsLineLayout, 3, 0, 1, 3)
         mainLayout.addWidget(messagesBox, 4, 0, 1, 3)
-        mainLayout.addLayout(configurationLineLayout, 5, 0, 1, 3)
 
         mainWidget = QWidget(self)
         mainWidget.setLayout(mainLayout)
@@ -233,7 +201,6 @@ class MainWindow(QMainWindow):
         outputFileSelector.clicked.connect(self.selectOutputFile)
         recordButton.clicked.connect(self.initiateRecording)
         stopButton.clicked.connect(self.cancelRecording)
-        configurationOpenButton.clicked.connect(self.openConfigFile)
 
         self.urlInputBox = urlInputBox
         self.outputFileInputBox = outputFileInputBox
@@ -241,60 +208,22 @@ class MainWindow(QMainWindow):
         self.recordButton = recordButton
         self.stopButton = stopButton
         self.messagesBox = messagesBox
-        self.configurationOpenButton = configurationOpenButton
 
         self.show()
 
-    # Raises configparser.Error when config file is corrupted.
-    def loadConfig(self):
-        self.config = Config()
-
-        configDir = appdirs.user_config_dir(APP_NAME)
-        os.makedirs(configDir, exist_ok=True)
-        self.configFile = os.path.join(configDir, 'defaults.ini')
-
-        if not os.path.exists(self.configFile):
-            with open(self.configFile, 'w') as fp:
-                fp.write(SAMPLE_CONFIG_FILE)
-
-        config = configparser.ConfigParser()
-        with open(self.configFile) as fp:
-            config.read_file(fp)
-
-        self.config.liveUrl = config.get('DEFAULT', 'live_url', fallback='')
-        self.config.downloadsDir = os.path.expanduser(config.get('DEFAULT', 'downloads_dir',
-                                                                 fallback=DEFAULT_DOWNLOADS_DIR))
-        if not os.path.isabs(self.config.downloadsDir):
-            QMessageBox.warning(self, 'Warning',
-                                'Default downloads directory "%s" from your configuration file '
-                                'is not absolute, hence ignored. Please check your configuration.'
-                                % self.config.downloadsDir)
-            self.config.downloadsDir = os.path.expanduser(DEFAULT_DOWNLOADS_DIR)
-        self.config.outputFile = config.get('DEFAULT', 'output_file', fallback='')
-        if self.config.outputFile and not os.path.isabs(self.config.outputFile):
-            self.config.outputFile = os.path.join(self.config.downloadsDir, self.config.outputFile)
-        self.config.overwrite = config.getboolean('DEFAULT', 'overwrite', fallback=False)
-
     def initDefaults(self):
-        try:
-            self.loadConfig()
-        except configparser.Error:
-            QMessageBox.warning(self, 'Warning',
-                                ('Configuration file "%s" is corrupted '
-                                 'and has been moved to a backup.' % self.configFile))
-            try:
-                os.replace(self.configFile, '%s.bak' % self.configFile)
-            except OSError:
-                try:
-                    os.remove(self.configFile)
-                except OSError:
-                    pass
-            # Write and load the default config
-            self.loadConfig()
+        config = Config()
+        self.config = config
+        settings = self.settings
 
-        self.urlInputBox.setText(self.config.liveUrl)
-        self.outputFileInputBox.setText(self.config.outputFile)
-        self.overwriteCheckbox.setChecked(self.config.overwrite)
+        config.liveUrl = settings.value('liveUrl', '')
+        config.downloadsDir = settings.value('downloadsDir', DEFAULT_DOWNLOADS_DIR)
+        config.outputFile = settings.value('outputFile', '')
+        config.overwrite = settings.value('overwrite', False, type=bool)
+
+        self.urlInputBox.setText(config.liveUrl)
+        self.outputFileInputBox.setText(config.outputFile)
+        self.overwriteCheckbox.setChecked(config.overwrite)
 
     def initSignals(self):
         self.recording = False
@@ -481,10 +410,6 @@ class MainWindow(QMainWindow):
         self.stopButton.setEnabled(False)
 
     @pyqtSlot()
-    def openConfigFile(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.configFile))
-
-    @pyqtSlot()
     def cleanUp(self):
         self.recordingCanceled.emit()
         # Wait for recording to stop (max 3 seconds)
@@ -547,9 +472,11 @@ class ConfigureWindow(QDialog):
 
         outputFileInfoLabel = QLabel('Default output file:')
         outputFileBox = QLineEdit(self, readOnly=True)
+        outputFileClearButton = QPushButton('Clear', maximumWidth=75, focusPolicy=Qt.NoFocus)
         outputFileSelector = QPushButton('Select', maximumWidth=75, focusPolicy=Qt.NoFocus)
         outputFileLineLayout = QHBoxLayout()
         outputFileLineLayout.addWidget(outputFileBox)
+        outputFileLineLayout.addWidget(outputFileClearButton)
         outputFileLineLayout.addWidget(outputFileSelector)
 
         downloadsDirInfoLabel = QLabel('Default downloads directory '
@@ -603,6 +530,7 @@ class ConfigureWindow(QDialog):
         mainLayout.setSizeConstraint(QLayout.SetFixedSize)
         self.setLayout(mainLayout)
 
+        outputFileClearButton.clicked.connect(self.clearOutputFile)
         outputFileSelector.clicked.connect(self.selectOutputFile)
         downloadsDirSelector.clicked.connect(self.selectDownloadsDir)
         saveButton.clicked.connect(self.save)
@@ -635,7 +563,18 @@ class ConfigureWindow(QDialog):
         config.outputFile = self.outputFileBox.text()
         config.downloadsDir = self.downloadsDirBox.text()
         config.overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
+
+        settings = self.mainWindow.settings
+        settings.setValue('liveUrl', config.liveUrl)
+        settings.setValue('outputFile', config.outputFile)
+        settings.setValue('downloadsDir', config.downloadsDir)
+        settings.setValue('overwrite', config.overwrite)
+
         self.hide()
+
+    @pyqtSlot()
+    def clearOutputFile(self):
+        self.outputFileBox.setText('')
 
     @pyqtSlot()
     def selectOutputFile(self):

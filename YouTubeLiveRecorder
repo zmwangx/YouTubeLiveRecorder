@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
 
         outputFileInputLabel = QLabel('Output file:')
         outputFileInputBox = QLineEdit(
-            self, placeholderText='Auto-determined by youtube-dl if left blank.')
+            self, placeholderText='Auto-determined by youtube-dl if left blank.', readOnly=True)
         outputFileSelector = QPushButton('Select', maximumWidth=75)
 
         overwriteLabel = QLabel('Overwrite:')

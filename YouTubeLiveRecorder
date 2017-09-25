@@ -42,10 +42,12 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -157,6 +159,7 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
         self.aboutWindow = None
+        self.configureWindow = None
 
     def initUI(self):
         self.resize(500, 400)
@@ -171,12 +174,16 @@ class MainWindow(QMainWindow):
         openAboutWindowAction = QAction('&About', self)
         openAboutWindowAction.triggered.connect(self.openAboutWindow)
 
+        openConfigureWindowAction = QAction('&Configure...', self)
+        openConfigureWindowAction.triggered.connect(self.openConfigureWindow)
+
         menubar = self.menuBar()
         configurationMenu = menubar.addMenu('&Configuration')
         configurationMenu.addAction(openAboutWindowAction)
+        configurationMenu.addAction(openConfigureWindowAction)
 
         urlInputLabel = QLabel('Live URL:')
-        urlInputBox = QLineEdit(self, placeholderText='https://youtube.com/ChinaSNH48/live')
+        urlInputBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')
 
         outputFileInputLabel = QLabel('Output file:')
         outputFileInputBox = QLineEdit(
@@ -328,6 +335,14 @@ class MainWindow(QMainWindow):
         self.aboutWindow.show()
         self.aboutWindow.activateWindow()
         self.aboutWindow.raise_()
+
+    @pyqtSlot()
+    def openConfigureWindow(self):
+        if self.configureWindow is None:
+            self.configureWindow = ConfigureWindow(self)
+        self.configureWindow.show()
+        self.configureWindow.activateWindow()
+        self.configureWindow.raise_()
 
     @pyqtSlot(str, str)
     def setDepVersion(self, dep, version):
@@ -513,7 +528,135 @@ class AboutWindow(QDialog):
 
         layout = QVBoxLayout()
         layout.addWidget(aboutLabel)
+        layout.setSizeConstraint(QLayout.SetFixedSize)
         self.setLayout(layout)
+
+
+class ConfigureWindow(QDialog):
+
+    def __init__(self, mainWindow):
+        super().__init__(mainWindow)
+        self.mainWindow = mainWindow
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('Preferences')
+
+        urlInfoLabel = QLabel('Default live URL:')
+        urlBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')
+
+        outputFileInfoLabel = QLabel('Default output file:')
+        outputFileBox = QLineEdit(self, readOnly=True)
+        outputFileSelector = QPushButton('Select', maximumWidth=75, focusPolicy=Qt.NoFocus)
+        outputFileLineLayout = QHBoxLayout()
+        outputFileLineLayout.addWidget(outputFileBox)
+        outputFileLineLayout.addWidget(outputFileSelector)
+
+        downloadsDirInfoLabel = QLabel('Default downloads directory '
+                                       '(used when output file is not specified):')
+        downloadsDirBox = QLineEdit(self, readOnly=True)
+        downloadsDirSelector = QPushButton('Select', maximumWidth=75, focusPolicy=Qt.NoFocus)
+        downloadsDirLineLayout = QHBoxLayout()
+        downloadsDirLineLayout.addWidget(downloadsDirBox)
+        downloadsDirLineLayout.addWidget(downloadsDirSelector)
+
+        overwriteInfoLabel = QLabel('Overwrite existing file by default:')
+        overwriteCheckbox = QCheckBox()
+        overwriteCheckbox.setLayoutDirection(Qt.RightToLeft)  # Right align checkbox
+        overwriteLineLayout = QHBoxLayout()
+        overwriteLineLayout.addWidget(overwriteInfoLabel)
+        overwriteLineLayout.addWidget(overwriteCheckbox)
+
+        horizontalRule1 = QWidget(styleSheet='background: #bbb')
+        horizontalRule1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        horizontalRule1.setFixedHeight(1)
+
+        caveatsLabel = QLabel('Settings other than the default downloads directory '
+                              'are only applied after you restart the application.',
+                              styleSheet='color: gray', wordWrap=True)
+
+        horizontalRule2 = QWidget(styleSheet='background: #bbb')
+        horizontalRule2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        horizontalRule2.setFixedHeight(1)
+
+        saveButton = QPushButton('Save', minimumWidth=90, default=True)
+        revertButton = QPushButton('Revert', minimumWidth=90, focusPolicy=Qt.NoFocus)
+        cancelButton = QPushButton('Cancel', minimumWidth=90, focusPolicy=Qt.NoFocus)
+        actionBarLayout = QHBoxLayout()
+        actionBarLayout.addStretch(1)
+        actionBarLayout.addWidget(saveButton)
+        actionBarLayout.addWidget(revertButton)
+        actionBarLayout.addWidget(cancelButton)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.addWidget(urlInfoLabel)
+        mainLayout.addWidget(urlBox)
+        mainLayout.addWidget(outputFileInfoLabel)
+        mainLayout.addLayout(outputFileLineLayout)
+        mainLayout.addWidget(downloadsDirInfoLabel)
+        mainLayout.addLayout(downloadsDirLineLayout)
+        mainLayout.addLayout(overwriteLineLayout)
+        mainLayout.addWidget(horizontalRule1)
+        mainLayout.addWidget(caveatsLabel)
+        mainLayout.addWidget(horizontalRule2)
+        mainLayout.addLayout(actionBarLayout)
+        mainLayout.setSizeConstraint(QLayout.SetFixedSize)
+        self.setLayout(mainLayout)
+
+        outputFileSelector.clicked.connect(self.selectOutputFile)
+        downloadsDirSelector.clicked.connect(self.selectDownloadsDir)
+        saveButton.clicked.connect(self.save)
+        revertButton.clicked.connect(self.revert)
+        cancelButton.clicked.connect(self.hide)
+
+        self.urlBox = urlBox
+        self.outputFileBox = outputFileBox
+        self.downloadsDirBox = downloadsDirBox
+        self.overwriteCheckbox = overwriteCheckbox
+
+    # Revert to saved values on show
+    @pyqtSlot()
+    def show(self):
+        self.revert()
+        super().show()
+
+    @pyqtSlot()
+    def revert(self):
+        config = self.mainWindow.config
+        self.urlBox.setText(config.liveUrl)
+        self.outputFileBox.setText(config.outputFile)
+        self.downloadsDirBox.setText(config.downloadsDir)
+        self.overwriteCheckbox.setChecked(config.overwrite)
+
+    @pyqtSlot()
+    def save(self):
+        config = self.mainWindow.config
+        config.liveUrl = self.urlBox.text()
+        config.outputFile = self.outputFileBox.text()
+        config.downloadsDir = self.downloadsDirBox.text()
+        config.overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
+        self.hide()
+
+    @pyqtSlot()
+    def selectOutputFile(self):
+        options = QFileDialog.Options() | QFileDialog.DontConfirmOverwrite
+        currentFilename = self.outputFileBox.text()
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 'Default output file',
+            currentFilename if currentFilename else self.downloadsDirBox.text(),
+            'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
+        if filename:
+            self.outputFileBox.setText(filename)
+
+    @pyqtSlot()
+    def selectDownloadsDir(self):
+        options = (QFileDialog.Options() | QFileDialog.ShowDirsOnly |
+                   QFileDialog.DontResolveSymlinks)
+        currentDir = self.downloadsDirBox.text()
+        dirname = QFileDialog.getExistingDirectory(
+            self, 'Default downloads directory', currentDir, options=options)
+        if dirname:
+            self.downloadsDirBox.setText(dirname)
 
 
 class DepChecker(QThread):

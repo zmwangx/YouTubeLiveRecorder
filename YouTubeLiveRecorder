@@ -665,7 +665,7 @@ class ConfigureWindow(QDialog):
         ffmpegLogLevelLineLayout.addWidget(ffmpegLogLevelDropdown)
 
         ffmepgShowChunkUrlsInfoLabel = QLabel('Show chunk URLs '
-                                              '(only affects the info log level)')
+                                              '(only affects the "info" log level)')
         ffmepgShowChunkUrlsCheckbox = QCheckBox()
         ffmepgShowChunkUrlsCheckbox.setLayoutDirection(Qt.RightToLeft)  # Right align checkbox
         ffmpegShowChunkUrlsLineLayout = QHBoxLayout()

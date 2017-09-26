@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         buttonsLineLayout.addWidget(recordButton)
         buttonsLineLayout.addWidget(stopButton)
 
-        messagesBox = QTextEdit(self, readOnly=True, styleSheet='font-family: monospaced')
+        messagesBox = QTextEdit(self, readOnly=True)
         messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
 
         mainLayout = QGridLayout(spacing=8)
@@ -370,12 +370,13 @@ class MainWindow(QMainWindow):
             time_ = m.group('time')
             level = m.group('level')
             message_body = m.group('body')
-            htmltext = ('<span style="color:blue">{time}</span> '
-                        '<span style="color:{levelcolor}"><b>[{level}]</b> {message_body}</span>'
+            htmltext = ('<span style="color:blue;{font}">{time}</span> '
+                        '<span style="color:{levelcolor};{font}"><b>[{level}]</b> {message_body}</span>'  # noqa
                         # Insert a dummy space to force QTextEdit to restore color.
-                        '<span style="color:initial">&nbsp;</span>'.format(
+                        '<span style="color:initial;{font}">&nbsp;</span>'.format(
                             time=time_, levelcolor=cls._levelToColor[level], level=level,
                             message_body=html.escape(message_body),
+                            font='font-family:Courier',
                         ))
             if message.endswith('\n'):
                 return [(Printable.HTML, htmltext), (Printable.PLAIN, '\n')]

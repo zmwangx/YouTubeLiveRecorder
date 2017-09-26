@@ -38,6 +38,7 @@ from PyQt5.QtWidgets import (
     QAction,
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QGridLayout,
@@ -103,6 +104,10 @@ class Config(object):
         self.downloadsDir = DEFAULT_DOWNLOADS_DIR
         self.outputFile = ''
         self.overwrite = False
+        self.ffmpegOptions = dict(
+            logLevel='info',
+            showChunkUrls=False,
+        )
 
 
 # Fix subprocess popups when running pyinstaller-generated exe on Windows.
@@ -128,7 +133,7 @@ def standard_subprocess_kwargs():
 
 class MainWindow(QMainWindow):
 
-    recordingInitiated = pyqtSignal(str, str, bool)
+    recordingInitiated = pyqtSignal(str, str, bool, dict)
     recordingCanceled = pyqtSignal()
 
     def __init__(self):
@@ -250,6 +255,9 @@ class MainWindow(QMainWindow):
         config.downloadsDir = settings.value('downloadsDir', DEFAULT_DOWNLOADS_DIR)
         config.outputFile = settings.value('outputFile', '')
         config.overwrite = settings.value('overwrite', False, type=bool)
+        config.ffmpegOptions['logLevel'] = settings.value('ffmpegLogLevel', 'info')
+        config.ffmpegOptions['showChunkUrls'] = settings.value('ffmpegShowChunkUrls', False,
+                                                               type=bool)
 
         self.urlInputBox.setText(config.liveUrl)
         self.outputFileInputBox.setText(config.outputFile)
@@ -393,7 +401,7 @@ class MainWindow(QMainWindow):
         overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
 
         self.updateStatusMessage()
-        self.recordingInitiated.emit(liveUrl, outputFile, overwrite)
+        self.recordingInitiated.emit(liveUrl, outputFile, overwrite, self.config.ffmpegOptions)
         self.recording = True
         self.recordButton.setEnabled(False)
         self.stopButton.setEnabled(True)
@@ -560,6 +568,9 @@ class AboutWindow(QDialog):
 
 class ConfigureWindow(QDialog):
 
+    FFMPEG_LOG_LEVELS = ['quiet', 'panic', 'fatal', 'error', 'warning',
+                         'info', 'verbose', 'debug', 'trace']
+
     def __init__(self, mainWindow):
         super().__init__(mainWindow)
         self.mainWindow = mainWindow
@@ -595,17 +606,40 @@ class ConfigureWindow(QDialog):
         overwriteLineLayout.addWidget(overwriteInfoLabel)
         overwriteLineLayout.addWidget(overwriteCheckbox)
 
-        horizontalRule1 = QWidget(styleSheet='background: #bbb')
-        horizontalRule1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        horizontalRule1.setFixedHeight(1)
+        def newHorizontalRule():
+            rule = QWidget(styleSheet='background: #bbb')
+            rule.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            rule.setFixedHeight(1)
+            return rule
+
+        horizontalRule1 = newHorizontalRule()
 
         caveatsLabel = QLabel('Settings other than the default downloads directory '
                               'are only applied after you restart the application.',
                               styleSheet='color: gray', wordWrap=True)
 
-        horizontalRule2 = QWidget(styleSheet='background: #bbb')
-        horizontalRule2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        horizontalRule2.setFixedHeight(1)
+        horizontalRule2 = newHorizontalRule()
+
+        ffmpegOptionsHeadingLabel = QLabel('FFmpeg options (advanced)',
+                                           styleSheet='font-weight: bold')
+
+        ffmpegLogLevelInfoLabel = QLabel('FFmpeg log level')
+        ffmpegLogLevelDropdown = QComboBox(maximumWidth=120)
+        ffmpegLogLevelDropdown.addItems(self.FFMPEG_LOG_LEVELS)
+        ffmpegLogLevelDropdown.setLayoutDirection(Qt.RightToLeft)  # Right align dropdown
+        ffmpegLogLevelLineLayout = QHBoxLayout()
+        ffmpegLogLevelLineLayout.addWidget(ffmpegLogLevelInfoLabel)
+        ffmpegLogLevelLineLayout.addWidget(ffmpegLogLevelDropdown)
+
+        ffmepgShowChunkUrlsInfoLabel = QLabel('Show chunk URLs '
+                                              '(only affects the info log level)')
+        ffmepgShowChunkUrlsCheckbox = QCheckBox()
+        ffmepgShowChunkUrlsCheckbox.setLayoutDirection(Qt.RightToLeft)  # Right align checkbox
+        ffmpegShowChunkUrlsLineLayout = QHBoxLayout()
+        ffmpegShowChunkUrlsLineLayout.addWidget(ffmepgShowChunkUrlsInfoLabel)
+        ffmpegShowChunkUrlsLineLayout.addWidget(ffmepgShowChunkUrlsCheckbox)
+
+        horizontalRule3 = newHorizontalRule()
 
         saveButton = QPushButton('Save', minimumWidth=90, default=True)
         revertButton = QPushButton('Revert', minimumWidth=90, focusPolicy=Qt.NoFocus)
@@ -625,8 +659,12 @@ class ConfigureWindow(QDialog):
         mainLayout.addLayout(downloadsDirLineLayout)
         mainLayout.addLayout(overwriteLineLayout)
         mainLayout.addWidget(horizontalRule1)
-        mainLayout.addWidget(caveatsLabel)
+        mainLayout.addWidget(ffmpegOptionsHeadingLabel)
+        mainLayout.addLayout(ffmpegLogLevelLineLayout)
+        mainLayout.addLayout(ffmpegShowChunkUrlsLineLayout)
         mainLayout.addWidget(horizontalRule2)
+        mainLayout.addWidget(caveatsLabel)
+        mainLayout.addWidget(horizontalRule3)
         mainLayout.addLayout(actionBarLayout)
         mainLayout.setSizeConstraint(QLayout.SetFixedSize)
         self.setLayout(mainLayout)
@@ -642,6 +680,8 @@ class ConfigureWindow(QDialog):
         self.outputFileBox = outputFileBox
         self.downloadsDirBox = downloadsDirBox
         self.overwriteCheckbox = overwriteCheckbox
+        self.ffmpegLogLevelDropdown = ffmpegLogLevelDropdown
+        self.ffmepgShowChunkUrlsCheckbox = ffmepgShowChunkUrlsCheckbox
 
     # Revert to saved values on show
     @pyqtSlot()
@@ -656,6 +696,8 @@ class ConfigureWindow(QDialog):
         self.outputFileBox.setText(config.outputFile)
         self.downloadsDirBox.setText(config.downloadsDir)
         self.overwriteCheckbox.setChecked(config.overwrite)
+        self.ffmpegLogLevelDropdown.setCurrentText(config.ffmpegOptions['logLevel'])
+        self.ffmepgShowChunkUrlsCheckbox.setChecked(config.ffmpegOptions['showChunkUrls'])
 
     @pyqtSlot()
     def save(self):
@@ -664,12 +706,17 @@ class ConfigureWindow(QDialog):
         config.outputFile = self.outputFileBox.text()
         config.downloadsDir = self.downloadsDirBox.text()
         config.overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
+        config.ffmpegOptions['logLevel'] = self.ffmpegLogLevelDropdown.currentText()
+        config.ffmpegOptions['showChunkUrls'] = (
+            self.ffmepgShowChunkUrlsCheckbox.checkState() == Qt.Checked)
 
         settings = self.mainWindow.settings
         settings.setValue('liveUrl', config.liveUrl)
         settings.setValue('outputFile', config.outputFile)
         settings.setValue('downloadsDir', config.downloadsDir)
         settings.setValue('overwrite', config.overwrite)
+        settings.setValue('ffmpegLogLevel', config.ffmpegOptions['logLevel'])
+        settings.setValue('ffmpegShowChunkUrls', config.ffmpegOptions['showChunkUrls'])
 
         self.hide()
 
@@ -767,8 +814,8 @@ class Worker(QObject):
         handler.setFormatter(logging.Formatter(**LOGGING_FORMATTER_OPTIONS))
         self.logger.addHandler(handler)
 
-    @pyqtSlot(str, str, bool)
-    def record(self, liveUrl, outputFile, overwrite):
+    @pyqtSlot(str, str, bool, dict)
+    def record(self, liveUrl, outputFile, overwrite, ffmpegOptions):
         self.newMessage.emit('=' * 30 + '\n')
         self.logger.info('Recording initiated: %s', liveUrl)
         self.logger.info('Recording to %s: %s (%s)',
@@ -776,7 +823,7 @@ class Worker(QObject):
                          'overwrite if exists' if overwrite else 'never overwrite')
 
         connRecv, connSend = multiprocessing.Pipe()
-        recorder = RecorderProcess(liveUrl, outputFile, overwrite, connSend)
+        recorder = RecorderProcess(liveUrl, outputFile, overwrite, ffmpegOptions, connSend)
         recorder.start()
 
         self.interrupted = False
@@ -832,11 +879,13 @@ class RecorderProcess(multiprocessing.Process):
 
     # If output_file is a directory, let youtube-dl determine the filename.
     # conn is the sending end of a multiprocessing.Pipe.
-    def __init__(self, live_url, output_file, overwrite, conn):
+    def __init__(self, live_url, output_file, overwrite, ffmpegOptions, conn):
         super().__init__()
         self.live_url = live_url
         self.output_file = output_file
         self.overwrite = overwrite
+        self.log_level = ffmpegOptions['logLevel']
+        self.show_chunk_urls = ffmpegOptions['showChunkUrls']
         self.conn = conn
         self.init_logger()
 
@@ -972,8 +1021,8 @@ class RecorderProcess(multiprocessing.Process):
             self.logger.error('Failed to create directory "%s"' % output_dir)
             sys.exit(1)
 
-        ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
-                      '-y' if overwrite else '-n', output_file]
+        ffmpeg_cmd = ['ffmpeg', '-loglevel', self.log_level, '-i', stream_url, '-c', 'copy',
+                      '-f', 'mpegts', '-y' if overwrite else '-n', output_file]
         self.log_command(ffmpeg_cmd)
         try:
             ffmpeg_process = None

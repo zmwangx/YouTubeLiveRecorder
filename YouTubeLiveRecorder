@@ -771,8 +771,8 @@ class Worker(QObject):
     def record(self, liveUrl, outputFile, overwrite):
         self.newMessage.emit('=' * 30 + '\n')
         self.logger.info('Recording initiated: %s', liveUrl)
-        self.logger.info('Recording to file: %s (%s)',
-                         outputFile if outputFile else '<auto>',
+        self.logger.info('Recording to %s: %s (%s)',
+                         'directory' if os.path.isdir(outputFile) else 'file', outputFile,
                          'overwrite if exists' if overwrite else 'never overwrite')
 
         connRecv, connSend = multiprocessing.Pipe()

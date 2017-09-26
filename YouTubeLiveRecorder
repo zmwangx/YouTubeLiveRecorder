@@ -53,7 +53,7 @@ from PyQt5.QtWidgets import (
 APP_AUTHOR = 'Zhiming Wang'
 APP_AUTHOR_DOMAIN = 'zhimingwang.org'
 APP_NAME = 'YouTubeLiveRecorder'
-APP_VERSION = 'v0.1a4'
+APP_VERSION = 'v0.1a5'
 APP_TITLE = 'YouTube Live Recorder %s' % APP_VERSION
 ABOUT = '''
 <b>YouTube Live Recorder</b> {appVersion}

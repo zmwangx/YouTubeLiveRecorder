@@ -16,12 +16,14 @@ import tempfile
 import threading
 import time
 
+import humanize
 import psutil
 from PyQt5.QtCore import (
     Qt,
     QObject,
     QSettings,
     QThread,
+    QTimer,
     pyqtSignal,
     pyqtSlot,
 )
@@ -148,12 +150,17 @@ class MainWindow(QMainWindow):
     def initUI(self):
         self.resize(500, 400)
         self.setMinimumSize(400, 250)
+        self.setWindowTitle(APP_TITLE)
 
         self.settings = QSettings()
         self.restoreGeometry(self.settings.value('geometry', b''))
         self.restoreState(self.settings.value('windowState', b''))
 
-        self.setWindowTitle(APP_TITLE)
+        self.statusBar().setStyleSheet('border-top: 1px solid #bbb; font-family: monospaced')
+        self.recordingStartTime = None
+        self.recordingOutputFile = None
+        self.recordingTimer = None
+        self.updateStatusMessage()
 
         openAboutWindowAction = QAction('&About', self)
         openAboutWindowAction.triggered.connect(self.openAboutWindow)
@@ -342,6 +349,7 @@ class MainWindow(QMainWindow):
 
         overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
 
+        self.updateStatusMessage()
         self.recordingInitiated.emit(liveUrl, outputFile, overwrite)
         self.recording = True
         self.recordButton.setEnabled(False)
@@ -416,11 +424,46 @@ class MainWindow(QMainWindow):
         else:
             scrollBar.setValue(scrollBar.maximum())
 
+    @pyqtSlot(float, str)
+    def handleRecordingStarted(self, startTime, outputFile):
+        self.recordingStartTime = startTime
+        self.recordingOutputFile = outputFile
+        self.recordingTimer = QTimer(self, interval=1000)
+        self.recordingTimer.timeout.connect(self.updateStatusMessage)
+        self.recordingTimer.start()
+
     @pyqtSlot()
     def handleRecordingStopped(self):
         self.recording = False
+        self.recordingStartTime = None
+        self.recordingOutputFile = None
+        if self.recordingTimer is not None:
+            self.recordingTimer.stop()
+            self.recordingTimer = None
         self.recordButton.setEnabled(True)
         self.stopButton.setEnabled(False)
+
+    @staticmethod
+    def formatDuration(duration):
+        seconds = int(duration % 60)
+        minutes = int(duration / 60) % 60
+        hours = int(duration / 3600)
+        return f'{hours}:{minutes:02d}:{seconds:02d}'
+
+    @pyqtSlot()
+    def updateStatusMessage(self):
+        if self.recordingStartTime is None:
+            elapsed = 0
+        else:
+            elapsed = time.time() - self.recordingStartTime
+        elapsedStr = self.formatDuration(elapsed)
+
+        message = f'Elapsed: {elapsedStr}'
+        if self.recordingOutputFile and os.path.isfile(self.recordingOutputFile):
+            sizeStr = humanize.naturalsize(os.path.getsize(self.recordingOutputFile), binary=True)
+            message += f', file size: {sizeStr}'
+
+        self.statusBar().showMessage(message)
 
     @pyqtSlot()
     def cleanUp(self):
@@ -658,6 +701,7 @@ class DepChecker(QThread):
 class Worker(QObject):
 
     newMessage = pyqtSignal(str)
+    recordingStarted = pyqtSignal(float, str)
     recordingStopped = pyqtSignal()
 
     def __init__(self, gui):
@@ -668,6 +712,7 @@ class Worker(QObject):
 
     def initSignals(self):
         self.newMessage.connect(self.gui.printMessage)
+        self.recordingStarted.connect(self.gui.handleRecordingStarted)
         self.recordingStopped.connect(self.gui.handleRecordingStopped)
 
     def initLogger(self):
@@ -692,8 +737,15 @@ class Worker(QObject):
         self.interrupted = False
         while not self.interrupted:
             while connRecv.poll():
-                message = connRecv.recv()
-                self.newMessage.emit(message)
+                obj = connRecv.recv()
+                if isinstance(obj, RecorderEvent):
+                    if obj.type == RecorderEvent.RECORDING_STARTED:
+                        self.recordingStarted.emit(
+                            obj.payload['start_time'],
+                            obj.payload['output_file'],
+                        )
+                else:
+                    self.newMessage.emit(obj)
             if not recorder.is_alive():
                 break
             app.processEvents()
@@ -874,6 +926,7 @@ class RecorderProcess(multiprocessing.Process):
         except OSError:
             self.logger.error('Failed to create directory "%s"' % output_dir)
             sys.exit(1)
+
         ffmpeg_cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts',
                       '-y' if overwrite else '-n', output_file]
         self.log_command(ffmpeg_cmd)
@@ -886,6 +939,12 @@ class RecorderProcess(multiprocessing.Process):
                 stderr=subprocess.STDOUT,
                 **standard_subprocess_kwargs(),
             )
+
+            self.conn.send(RecorderEvent(RecorderEvent.RECORDING_STARTED, dict(
+                start_time=time.time(),
+                output_file=self.output_file,
+            )))
+
             self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
         except (OSError, subprocess.SubprocessError):
             if not ffmpeg_process:
@@ -894,6 +953,16 @@ class RecorderProcess(multiprocessing.Process):
         if ffmpeg_process.returncode != 0:
             self.logger.error('ffmpeg failed with exit status %d', ffmpeg_process.returncode)
             sys.exit(1)
+
+
+class RecorderEvent(object):
+
+    # Event types
+    RECORDING_STARTED = 0
+
+    def __init__(self, type_, payload=None):
+        self.type = type_
+        self.payload = payload
 
 
 class Printable(enum.Enum):

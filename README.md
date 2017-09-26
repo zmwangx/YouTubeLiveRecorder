@@ -1,6 +1,6 @@
 # YouTube Live Recorder
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg?maxAge=2592000)](COPYING)
+[![License](https://img.shields.io/badge/license-GPLv3-blue.svg?maxAge=2592000)](COPYING)
 ![Supported Python Versions: 3.6, 3.7](https://img.shields.io/badge/python-3.6,%203.7-blue.svg?maxAge=2592000)
 
 ## Prerequisites
@@ -28,3 +28,9 @@ venv\Scripts\activate
 pip install -r requirements.txt
 python YouTubeLiveRecorder
 ```
+
+## License
+
+Copyright © 2017 Zhiming Wang <zmwangx@gmail.com>
+
+This project is released under the GNU General Public License, Version 3 (aka GPLv3). I am NOT a GPL proponent (in fact, quite the opposite) — this project is GPL'ed only because PyQt5 is under GPL.

@@ -60,7 +60,7 @@ ABOUT = '''
 <hr>
 Author: <a href="https://github.com/zmwangx">Zhiming Wang</a><br>
 Contact: <a href="mailto:zmwangx@gmail.com">zmwangx@gmail.com</a><br>
-License: <a href="https://opensource.org/licenses/MIT">MIT</a><br>
+License: <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">GPLv3</a><br>
 Source: <a href="https://github.com/zmwangx/YouTubeLiveRecorder">https://git.io/YTLR</a><br>
 Bug reports:
 <a href="https://github.com/zmwangx/YouTubeLiveRecorder/issues">https://git.io/YTLR-bugs</a>

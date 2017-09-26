@@ -230,8 +230,8 @@ class MainWindow(QMainWindow):
         overwriteCheckbox = QCheckBox('(Overwrite if output file exists.)',
                                       styleSheet='color: gray')
 
-        recordButton = QPushButton('Record', maximumWidth=150)
-        stopButton = QPushButton('Stop', maximumWidth=150, enabled=False)
+        recordButton = QPushButton('Record', maximumWidth=150, focusPolicy=Qt.NoFocus)
+        stopButton = QPushButton('Stop', maximumWidth=150, enabled=False, focusPolicy=Qt.NoFocus)
 
         buttonsLineLayout = QHBoxLayout()
         buttonsLineLayout.addWidget(recordButton)

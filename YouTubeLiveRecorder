@@ -898,13 +898,13 @@ class RecorderProcess(multiprocessing.Process):
 
     # If output_file is a directory, let youtube-dl determine the filename.
     # conn is the sending end of a multiprocessing.Pipe.
-    def __init__(self, live_url, output_file, overwrite, ffmpegOptions, conn):
+    def __init__(self, live_url, output_file, overwrite, ffmpeg_options, conn):
         super().__init__()
         self.live_url = live_url
         self.output_file = output_file
         self.overwrite = overwrite
-        self.log_level = ffmpegOptions['logLevel']
-        self.show_chunk_urls = ffmpegOptions['showChunkUrls']
+        self.log_level = ffmpeg_options['logLevel']
+        self.hide_chunk_urls = self.log_level == 'info' and not ffmpeg_options['showChunkUrls']
         self.conn = conn
         self.init_logger()
 
@@ -1032,6 +1032,10 @@ class RecorderProcess(multiprocessing.Process):
 
         return stream_url, auto_filename_no_ext
 
+    CHUNK_URL_LINE_PATTERN = re.compile(r'(^|(?<=[\n\r]))\[.*?\] '
+                                        r'Opening \'https://[^.]+\.googlevideo\.com/[^\']+\''
+                                        r'.*?[\r\n]')
+
     def record_stream(self, stream_url, output_file, overwrite=False):
         try:
             output_dir = os.path.dirname(output_file)
@@ -1058,7 +1062,13 @@ class RecorderProcess(multiprocessing.Process):
                 output_file=self.output_file,
             )))
 
-            self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (self.conn.send,))
+            if self.hide_chunk_urls:
+                def output_handler(line):
+                    self.conn.send(self.CHUNK_URL_LINE_PATTERN.sub('', line))
+            else:
+                output_handler = self.conn.send
+
+            self.handle_output(ffmpeg_process, (ffmpeg_process.stdout,), (output_handler,))
         except (OSError, subprocess.SubprocessError):
             if not ffmpeg_process:
                 self.logger.error('Failed to start ffmpeg')

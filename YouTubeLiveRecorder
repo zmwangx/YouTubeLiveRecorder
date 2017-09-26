@@ -269,7 +269,7 @@ class MainWindow(QMainWindow):
             return version if version else None
 
         def extractFFmpegVersion(stdout):
-            m = re.match(r'^ffmpeg version (?P<version>\d+(\.\d+)+)', stdout)
+            m = re.match(r'^ffmpeg version (?P<version>[^ ]+)', stdout)
             if m:
                 return m.group('version')
             else:

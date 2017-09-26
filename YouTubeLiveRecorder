@@ -23,11 +23,13 @@ from PyQt5.QtCore import (
     QObject,
     QSettings,
     QThread,
+    QUrl,
     QTimer,
     pyqtSignal,
     pyqtSlot,
 )
 from PyQt5.QtGui import (
+    QDesktopServices,
     QIcon,
     QTextCursor,
     QTextOption,
@@ -159,6 +161,7 @@ class MainWindow(QMainWindow):
         self.statusBar().setStyleSheet('border-top: 1px solid #bbb; font-family: monospaced')
         self.recordingStartTime = None
         self.recordingOutputFile = None
+        self.lastRecordedFile = None
         self.recordingTimer = None
         self.updateStatusMessage()
 
@@ -168,10 +171,21 @@ class MainWindow(QMainWindow):
         openConfigureWindowAction = QAction('&Configure...', self)
         openConfigureWindowAction.triggered.connect(self.openConfigureWindow)
 
+        openFileAction = QAction('&Open recorded file', self)
+        openFileAction.setShortcut('Ctrl+O')
+        openFileAction.triggered.connect(self.openRecordedFile)
+
+        revealFileAction = QAction('&Reveal recorded file in folder', self)
+        revealFileAction.setShortcut('Alt+Ctrl+O')
+        revealFileAction.triggered.connect(self.revealRecordedFile)
+
         menubar = self.menuBar()
         configurationMenu = menubar.addMenu('&Configuration')
         configurationMenu.addAction(openAboutWindowAction)
         configurationMenu.addAction(openConfigureWindowAction)
+        fileMenu = menubar.addMenu('&File')
+        fileMenu.addAction(openFileAction)
+        fileMenu.addAction(revealFileAction)
 
         urlInputLabel = QLabel('Live URL:')
         urlInputBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')
@@ -287,6 +301,34 @@ class MainWindow(QMainWindow):
         self.configureWindow.show()
         self.configureWindow.activateWindow()
         self.configureWindow.raise_()
+
+    @property
+    def recordedFile(self):
+        if self.recordingOutputFile is not None:
+            return self.recordingOutputFile
+        elif self.lastRecordedFile is not None:
+            return self.lastRecordedFile
+        else:
+            return None
+
+    @pyqtSlot()
+    def openRecordedFile(self):
+        file = self.recordedFile
+        if file is None:
+            QMessageBox.warning(self, 'Warning', 'You have\'t recorded to a file yet.')
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(file))
+
+    @pyqtSlot()
+    def revealRecordedFile(self):
+        # Actually revealing the file seems to require platform-specific code
+        # that's just too sketchy, so we just only the directory and call it a
+        # day. Ref: https://stackoverflow.com/q/3490336
+        file = self.recordedFile
+        if file is None:
+            QMessageBox.warning(self, 'Warning', 'You have\'t recorded to a file yet.')
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(file)))
 
     @pyqtSlot(str, str)
     def setDepVersion(self, dep, version):
@@ -436,6 +478,8 @@ class MainWindow(QMainWindow):
     def handleRecordingStopped(self):
         self.recording = False
         self.recordingStartTime = None
+        if self.recordingOutputFile is not None:
+            self.lastRecordedFile = self.recordingOutputFile
         self.recordingOutputFile = None
         if self.recordingTimer is not None:
             self.recordingTimer.stop()

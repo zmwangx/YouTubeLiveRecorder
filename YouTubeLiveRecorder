@@ -26,6 +26,7 @@ from PyQt5.QtCore import (
     pyqtSlot,
 )
 from PyQt5.QtGui import (
+    QIcon,
     QTextCursor,
     QTextOption,
 )
@@ -69,11 +70,15 @@ youtube-dl version: {{ytdlVersion}}<br>
 FFmpeg version: {{ffmpegVersion}}
 '''.format(appVersion=APP_VERSION)
 
+ASSETS_DIR = os.path.join(sys._MEIPASS if hasattr(sys, '_MEIPASS') else  # noqa; pylint: disable=no-member,protected-access
+                          os.path.dirname(os.path.abspath(__file__)), 'assets')
+APP_ICON_PATH = os.path.join(ASSETS_DIR, 'icon-1024.png')
 
 app = QApplication(sys.argv)
 app.setOrganizationName(APP_AUTHOR)
 app.setOrganizationDomain(APP_AUTHOR_DOMAIN)
 app.setApplicationName(APP_NAME)
+app.setWindowIcon(QIcon(APP_ICON_PATH))
 
 LOGGING_FORMATTER_OPTIONS = dict(
     fmt='%(asctime)s [%(levelname)s] %(message)s',

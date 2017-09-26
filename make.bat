@@ -8,7 +8,7 @@ echo.
 goto help
 
 :make
-pyinstaller --windowed --onefile YouTubeLiveRecorder
+pyinstaller --windowed --onefile --icon=assets/icon.ico --add-binary=assets/icon-1024.png;assets YouTubeLiveRecorder
 goto end
 
 :run

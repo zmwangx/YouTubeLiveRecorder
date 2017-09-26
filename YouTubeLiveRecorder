@@ -185,6 +185,13 @@ class MainWindow(QMainWindow):
         revealFileAction.setShortcut('Alt+Ctrl+O')
         revealFileAction.triggered.connect(self.revealRecordedFile)
 
+        copyLogsAction = QAction('&Copy logs to clipboard', self)
+        copyLogsAction.triggered.connect(self.copyLogs)
+
+        clearLogsAction = QAction('&Clear the logs buffer', self)
+        clearLogsAction.setShortcut('Ctrl+K')
+        clearLogsAction.triggered.connect(self.clearLogs)
+
         menubar = self.menuBar()
         configurationMenu = menubar.addMenu('&Configuration')
         configurationMenu.addAction(openAboutWindowAction)
@@ -192,6 +199,9 @@ class MainWindow(QMainWindow):
         fileMenu = menubar.addMenu('&File')
         fileMenu.addAction(openFileAction)
         fileMenu.addAction(revealFileAction)
+        editMenu = menubar.addMenu('&Edit')
+        editMenu.addAction(copyLogsAction)
+        editMenu.addAction(clearLogsAction)
 
         urlInputLabel = QLabel('Live URL:')
         urlInputBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')
@@ -338,6 +348,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Warning', 'You have\'t recorded to a file yet.')
         else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(file)))
+
+    @pyqtSlot()
+    def copyLogs(self):
+        app.clipboard().setText(self.messagesBox.document().toPlainText())
+        QMessageBox.information(self, 'Info', 'Logs copied to clipboard.')
+
+    @pyqtSlot()
+    def clearLogs(self):
+        self.messagesBox.clear()
 
     @pyqtSlot(str, str)
     def setDepVersion(self, dep, version):

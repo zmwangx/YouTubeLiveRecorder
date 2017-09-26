@@ -1,3 +1,5 @@
+<img width="128" height="128" src="https://raw.githubusercontent.com/zmwangx/YouTubeLiveRecorder/master/assets/icon-1024.png">
+
 # YouTube Live Recorder
 
 [![License](https://img.shields.io/badge/license-GPLv3-blue.svg?maxAge=2592000)](COPYING)

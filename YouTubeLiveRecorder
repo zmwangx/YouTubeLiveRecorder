@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
         openAboutWindowAction.triggered.connect(self.openAboutWindow)
 
         openConfigureWindowAction = QAction('&Configure...', self)
+        openConfigureWindowAction.setShortcut('Ctrl+,')
         openConfigureWindowAction.triggered.connect(self.openConfigureWindow)
 
         openFileAction = QAction('&Open recorded file', self)

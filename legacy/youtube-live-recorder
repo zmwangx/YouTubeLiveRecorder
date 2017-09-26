@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+
+# Legacy CLI script (no longer updated), works with Python 2.7 and 3.3+.
+#
+# Imported from https://gist.github.com/zmwangx/8147bd7359352473881dd17eb1aa2e14.
+
+import argparse
+import json
+import logging
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+
+try:
+    from json import JSONDecodeError
+except ImportError:
+    # Python 2.x does not have json.JSONDecodeError
+    JSONDecodeError = ValueError
+
+
+logging.basicConfig(format='[%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def log_command(cmd):
+    try:
+        logger.info(' '.join(shlex.quote(arg) for arg in cmd))
+    except AttributeError:
+        # shlex.quote does not exist for Python <= 3.2
+        logger.info(' '.join(cmd))
+
+
+def fetch_stream_info(url):
+    cmd = ['youtube-dl', '--dump-json', url]
+    log_command(cmd)
+    try:
+        json_output = subprocess.check_output(cmd).decode('utf-8')
+    except subprocess.CalledProcessError:
+        logger.error('youtube-dl failed')
+        sys.exit(1)
+
+    try:
+        metadata = json.loads(json_output)
+    except JSONDecodeError as err:
+        # Try to parse line by line and pick out a line that parses as
+        # valid JSON. We assume that youtube-dl dumps each JSON object
+        # (only one in our case) on a single line, which is true at the
+        # time of writing.
+        #
+        # This is to mitigate (to some extent) an issue reported by a
+        # Windows user who wraps the command in SocksCap64, a proxy
+        # tunnel, which prints some stupid error messages to stdout. See
+        # the sample output here:
+        #     https://gist.github.com/snh487sensesakira/031eabe54206fd9e4a20257ebe03ba12
+        for line in json_output.split('\n'):
+            try:
+                metadata = json.loads(line)
+                break
+            except JSONDecodeError:
+                pass
+        else:
+            # Mitigation failed; JSON is truly corrupted.
+            fd, path = tempfile.mkstemp()
+            with os.fdopen(fd, 'w') as fp:
+                fp.write(json_output)
+            logger.error('Failed to decode JSON: %s', err)
+            logger.error('Response recorded to %s', path)
+            sys.exit(1)
+
+    format_id = metadata['format_id']
+    for stream in metadata['formats']:
+        if stream['format_id'] == format_id:
+            stream_url = stream['url']
+            protocol = stream['protocol']
+            if protocol != 'm3u8':
+                logger.warning('Unsupported protocol %s; is this really a live stream?', protocol)
+            break
+    else:
+        logger.error('format %s not found', format_id)
+        sys.exit(1)
+    filename = metadata['_filename']
+    filename_no_ext = os.path.splitext(filename)[0]
+    return stream_url, filename_no_ext
+
+
+def download(stream_url, filename_no_ext):
+    filename = '%s.ts' % filename_no_ext
+    cmd = ['ffmpeg', '-i', stream_url, '-c', 'copy', '-f', 'mpegts', filename]
+    log_command(cmd)
+    subprocess.call(cmd)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('url', help='live stream URL, e.g. https://youtube.com/ChinaSNH48/live')
+    args = parser.parse_args()
+
+    download(*fetch_stream_info(args.url))
+
+
+if __name__ == '__main__':
+    main()

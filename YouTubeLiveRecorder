@@ -598,10 +598,10 @@ class ConfigureWindow(QDialog):
     def initUI(self):
         self.setWindowTitle('Preferences')
 
-        urlInfoLabel = QLabel('Default live URL:')
+        urlInfoLabel = QLabel('*Default livestream URL:')
         urlBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')
 
-        outputFileInfoLabel = QLabel('Default output file:')
+        outputFileInfoLabel = QLabel('*Default output file:')
         outputFileBox = QLineEdit(self, readOnly=True)
         outputFileClearButton = QPushButton('Clear', maximumWidth=75, focusPolicy=Qt.NoFocus)
         outputFileSelector = QPushButton('Select', maximumWidth=75, focusPolicy=Qt.NoFocus)
@@ -618,7 +618,7 @@ class ConfigureWindow(QDialog):
         downloadsDirLineLayout.addWidget(downloadsDirBox)
         downloadsDirLineLayout.addWidget(downloadsDirSelector)
 
-        overwriteInfoLabel = QLabel('Overwrite existing file by default:')
+        overwriteInfoLabel = QLabel('*Overwrite existing file by default:')
         overwriteCheckbox = QCheckBox()
         overwriteCheckbox.setLayoutDirection(Qt.RightToLeft)  # Right align checkbox
         overwriteLineLayout = QHBoxLayout()
@@ -633,7 +633,7 @@ class ConfigureWindow(QDialog):
 
         horizontalRule1 = newHorizontalRule()
 
-        caveatsLabel = QLabel('Settings other than the default downloads directory '
+        caveatsLabel = QLabel('Note: Setting items marked with asterisks '
                               'are only applied after you restart the application.',
                               styleSheet='color: gray', wordWrap=True)
 

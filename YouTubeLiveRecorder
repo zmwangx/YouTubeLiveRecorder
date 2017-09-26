@@ -177,6 +177,14 @@ class MainWindow(QMainWindow):
         openConfigureWindowAction.setShortcut('Ctrl+,')
         openConfigureWindowAction.triggered.connect(self.openConfigureWindow)
 
+        recordAction = QAction('&Record', self)
+        recordAction.setShortcut('Ctrl+R')
+        recordAction.triggered.connect(self.initiateRecording)
+
+        stopAction = QAction('&Stop', self)
+        stopAction.setShortcut('Ctrl+S')
+        stopAction.triggered.connect(self.cancelRecording)
+
         openFileAction = QAction('&Open recorded file', self)
         openFileAction.setShortcut('Ctrl+O')
         openFileAction.triggered.connect(self.openRecordedFile)
@@ -193,12 +201,18 @@ class MainWindow(QMainWindow):
         clearLogsAction.triggered.connect(self.clearLogs)
 
         menubar = self.menuBar()
+
         configurationMenu = menubar.addMenu('&Configuration')
         configurationMenu.addAction(openAboutWindowAction)
         configurationMenu.addAction(openConfigureWindowAction)
+
         fileMenu = menubar.addMenu('&File')
+        fileMenu.addAction(recordAction)
+        fileMenu.addAction(stopAction)
+        fileMenu.addSeparator()
         fileMenu.addAction(openFileAction)
         fileMenu.addAction(revealFileAction)
+
         editMenu = menubar.addMenu('&Edit')
         editMenu.addAction(copyLogsAction)
         editMenu.addAction(clearLogsAction)

@@ -1038,7 +1038,7 @@ class RecorderProcess(multiprocessing.Process):
             self.record_stream(stream_url, self.output_file, overwrite=self.overwrite)
 
             self.conn.close()
-        except:  # pylint: disable=bare-except
+        except Exception:  # pylint: disable=broad-except
             # sys.excepthook does not get called by default in a
             # multiprocessing.Process.
             #

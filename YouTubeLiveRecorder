@@ -112,13 +112,35 @@ DECODING_PARAMS = dict(
 NOT_READY = object()
 
 
+class FileExistsBehavior(enum.IntEnum):
+    APPEND_NUMERIC_SUFFIX = 0
+    APPEND_TIMESTAMP_SUFFIX = 1
+    OVERWRITE = 2
+    REPORT_ERROR = 3
+
+
+FILE_EXISTS_BEHAVIOR_TITLES = [
+    'Append numeric suffix.',
+    'Append timestamp suffix.',
+    'Overwrite existing file.',
+    'Report error.',
+]
+
+FILE_EXISTS_BEHAVIOR_TOOLTIPS = [
+    'Example: "existing file.ts" → "existing file (1).ts".',
+    'Example: "existing file.ts" → "existing file (2017-09-27 16.11.03).ts".',
+    'Beware of the data loss potential.',
+    'Nothing is written.',
+]
+
+
 class Config(object):
 
     def __init__(self):
         self.liveUrl = ''
         self.downloadsDir = DEFAULT_DOWNLOADS_DIR
         self.outputFile = ''
-        self.overwrite = False
+        self.fileExistsBehavior = FileExistsBehavior.APPEND_NUMERIC_SUFFIX.value
         self.ffmpegOptions = dict(
             logLevel='info',
             showChunkUrls=False,
@@ -191,7 +213,7 @@ def systemOpen(path):
 
 class MainWindow(QMainWindow):
 
-    recordingInitiated = pyqtSignal(str, str, bool, dict)
+    recordingInitiated = pyqtSignal(str, str, int, dict)
     recordingCanceled = pyqtSignal()
 
     def __init__(self):
@@ -291,9 +313,19 @@ class MainWindow(QMainWindow):
         outputFileClearButton = QPushButton('Clear', maximumWidth=75)
         outputFileSelector = QPushButton('Select', maximumWidth=75)
 
-        overwriteLabel = QLabel('Overwrite:')
-        overwriteCheckbox = QCheckBox('(Overwrite if output file exists.)',
-                                      styleSheet='color: gray')
+        fileExistsBehaviorLabel = QLabel('What to do if output file exists?')
+        fileExistsBehaviorDropdown = QComboBox()
+        fileExistsBehaviorDropdown.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        fileExistsBehaviorDropdown.addItems(FILE_EXISTS_BEHAVIOR_TITLES)
+        for behavior in FileExistsBehavior:
+            index = behavior.value
+            tooltip = FILE_EXISTS_BEHAVIOR_TOOLTIPS[index]
+            if tooltip:
+                fileExistsBehaviorDropdown.setItemData(index, tooltip, Qt.ToolTipRole)
+        fileExistsBehaviorLineLayout = QHBoxLayout()
+        fileExistsBehaviorLineLayout.addWidget(fileExistsBehaviorLabel)
+        fileExistsBehaviorLineLayout.addStretch(1)
+        fileExistsBehaviorLineLayout.addWidget(fileExistsBehaviorDropdown)
 
         recordButton = QPushButton('Record', maximumWidth=150, focusPolicy=Qt.NoFocus)
         stopButton = QPushButton('Stop', maximumWidth=150, enabled=False, focusPolicy=Qt.NoFocus)
@@ -314,8 +346,7 @@ class MainWindow(QMainWindow):
         mainLayout.addWidget(outputFileInputBox, 1, 1)
         mainLayout.addWidget(outputFileClearButton, 1, 2)
         mainLayout.addWidget(outputFileSelector, 1, 3)
-        mainLayout.addWidget(overwriteLabel, 2, 0)
-        mainLayout.addWidget(overwriteCheckbox, 2, 1, 1, 3)
+        mainLayout.addLayout(fileExistsBehaviorLineLayout, 2, 0, 1, 4)
         mainLayout.addLayout(buttonsLineLayout, 3, 0, 1, 4)
         mainLayout.addWidget(messagesBox, 4, 0, 1, 4)
 
@@ -330,7 +361,7 @@ class MainWindow(QMainWindow):
 
         self.urlInputBox = urlInputBox
         self.outputFileInputBox = outputFileInputBox
-        self.overwriteCheckbox = overwriteCheckbox
+        self.fileExistsBehaviorDropdown = fileExistsBehaviorDropdown
         self.recordButton = recordButton
         self.stopButton = stopButton
         self.messagesBox = messagesBox
@@ -348,14 +379,17 @@ class MainWindow(QMainWindow):
         config.outputFile = settings.value('outputFile', '')
         if config.outputFile:
             config.outputFile = settings.value(config.outputFile)
-        config.overwrite = settings.value('overwrite', False, type=bool)
+        config.fileExistsBehavior = settings.value(
+            'fileExistsBehavior', FileExistsBehavior.APPEND_NUMERIC_SUFFIX.value, type=int)
         config.ffmpegOptions['logLevel'] = settings.value('ffmpegLogLevel', 'info')
-        config.ffmpegOptions['showChunkUrls'] = settings.value('ffmpegShowChunkUrls', False,
-                                                               type=bool)
+        config.ffmpegOptions['showChunkUrls'] = settings.value(
+            'ffmpegShowChunkUrls', False, type=bool)
+        # Remove legacy keys.
+        settings.remove('overwrite')
 
         self.urlInputBox.setText(config.liveUrl)
         self.outputFileInputBox.setText(config.outputFile)
-        self.overwriteCheckbox.setChecked(config.overwrite)
+        self.fileExistsBehaviorDropdown.setCurrentIndex(config.fileExistsBehavior)
 
     def initSignals(self):
         self.recording = False
@@ -494,16 +528,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, 'Error', 'Live URL is required.')
             return
 
+        fileExistsBehavior = FileExistsBehavior(self.fileExistsBehaviorDropdown.currentIndex())
+
         outputFile = self.outputFileInputBox.text()
-        if os.path.exists(outputFile) and self.overwriteCheckbox.checkState() != Qt.Checked:
-            setOverwrite = QMessageBox.question(
-                self, 'Overwrite?', 'The file you selected already exists. Overwrite?',
-                defaultButton=QMessageBox.No,
-            )
-            if setOverwrite == QMessageBox.Yes:
-                self.overwriteCheckbox.setChecked(True)
-            else:
-                return
+        if os.path.exists(outputFile) and fileExistsBehavior == FileExistsBehavior.REPORT_ERROR:
+            self.reportFileExists(outputFile)
+            return
 
         if not outputFile:
             try:
@@ -519,13 +549,19 @@ class MainWindow(QMainWindow):
                 # Set outputFile to the output directory, leaving the filename undetermined.
                 outputFile = self.config.downloadsDir
 
-        overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
-
         self.updateStatusMessage()
-        self.recordingInitiated.emit(liveUrl, outputFile, overwrite, self.config.ffmpegOptions)
+        self.recordingInitiated.emit(
+            liveUrl, outputFile, fileExistsBehavior, self.config.ffmpegOptions)
         self.recording = True
         self.recordButton.setEnabled(False)
         self.stopButton.setEnabled(True)
+
+    @pyqtSlot(str)
+    def reportFileExists(self, file):
+        QMessageBox.critical(
+            self, 'Error',
+            'File "%s" already exists.\n\n'
+            'Please choose another file or another rename/overwrite strategy.' % file)
 
     @pyqtSlot()
     def cancelRecording(self):
@@ -746,12 +782,19 @@ class ConfigureWindow(QDialog):
         downloadsDirLineLayout.addWidget(downloadsDirBox)
         downloadsDirLineLayout.addWidget(downloadsDirSelector)
 
-        overwriteInfoLabel = QLabel('*Overwrite existing file by default:')
-        overwriteCheckbox = QCheckBox()
-        overwriteLineLayout = QHBoxLayout()
-        overwriteLineLayout.addWidget(overwriteInfoLabel)
-        overwriteLineLayout.addStretch(1)
-        overwriteLineLayout.addWidget(overwriteCheckbox)
+        fileExistsBehaviorLabel = QLabel('*What to do if output file exists?')
+        fileExistsBehaviorDropdown = QComboBox(self)
+        fileExistsBehaviorDropdown.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        fileExistsBehaviorDropdown.addItems(FILE_EXISTS_BEHAVIOR_TITLES)
+        for behavior in FileExistsBehavior:
+            index = behavior.value
+            tooltip = FILE_EXISTS_BEHAVIOR_TOOLTIPS[index]
+            if tooltip:
+                fileExistsBehaviorDropdown.setItemData(index, tooltip, Qt.ToolTipRole)
+        fileExistsBehaviorLineLayout = QHBoxLayout()
+        fileExistsBehaviorLineLayout.addWidget(fileExistsBehaviorLabel)
+        fileExistsBehaviorLineLayout.addStretch(1)
+        fileExistsBehaviorLineLayout.addWidget(fileExistsBehaviorDropdown)
 
         def newHorizontalRule():
             rule = QWidget(styleSheet='background: #bbb')
@@ -805,7 +848,7 @@ class ConfigureWindow(QDialog):
         mainLayout.addLayout(outputFileLineLayout)
         mainLayout.addWidget(downloadsDirInfoLabel)
         mainLayout.addLayout(downloadsDirLineLayout)
-        mainLayout.addLayout(overwriteLineLayout)
+        mainLayout.addLayout(fileExistsBehaviorLineLayout)
         mainLayout.addWidget(horizontalRule1)
         mainLayout.addWidget(ffmpegOptionsHeadingLabel)
         mainLayout.addLayout(ffmpegLogLevelLineLayout)
@@ -827,7 +870,7 @@ class ConfigureWindow(QDialog):
         self.urlBox = urlBox
         self.outputFileBox = outputFileBox
         self.downloadsDirBox = downloadsDirBox
-        self.overwriteCheckbox = overwriteCheckbox
+        self.fileExistsBehaviorDropdown = fileExistsBehaviorDropdown
         self.ffmpegLogLevelDropdown = ffmpegLogLevelDropdown
         self.ffmepgShowChunkUrlsCheckbox = ffmepgShowChunkUrlsCheckbox
 
@@ -843,7 +886,7 @@ class ConfigureWindow(QDialog):
         self.urlBox.setText(config.liveUrl)
         self.outputFileBox.setText(config.outputFile)
         self.downloadsDirBox.setText(config.downloadsDir)
-        self.overwriteCheckbox.setChecked(config.overwrite)
+        self.fileExistsBehaviorDropdown.setCurrentIndex(config.fileExistsBehavior)
         self.ffmpegLogLevelDropdown.setCurrentText(config.ffmpegOptions['logLevel'])
         self.ffmepgShowChunkUrlsCheckbox.setChecked(config.ffmpegOptions['showChunkUrls'])
 
@@ -853,7 +896,7 @@ class ConfigureWindow(QDialog):
         config.liveUrl = self.urlBox.text()
         config.outputFile = self.outputFileBox.text()
         config.downloadsDir = self.downloadsDirBox.text()
-        config.overwrite = self.overwriteCheckbox.checkState() == Qt.Checked
+        config.fileExistsBehavior = self.fileExistsBehaviorDropdown.currentIndex()
         config.ffmpegOptions['logLevel'] = self.ffmpegLogLevelDropdown.currentText()
         config.ffmpegOptions['showChunkUrls'] = (
             self.ffmepgShowChunkUrlsCheckbox.checkState() == Qt.Checked)
@@ -862,7 +905,7 @@ class ConfigureWindow(QDialog):
         settings.setValue('liveUrl', config.liveUrl)
         settings.setValue('outputFile', config.outputFile)
         settings.setValue('downloadsDir', config.downloadsDir)
-        settings.setValue('overwrite', config.overwrite)
+        settings.setValue('fileExistsBehavior', config.fileExistsBehavior)
         settings.setValue('ffmpegLogLevel', config.ffmpegOptions['logLevel'])
         settings.setValue('ffmpegShowChunkUrls', config.ffmpegOptions['showChunkUrls'])
 
@@ -942,6 +985,7 @@ class Worker(QObject):
     newMessage = pyqtSignal(str)
     recordingStarted = pyqtSignal(float, str)
     recordingStopped = pyqtSignal()
+    fileExistsErrorReceived = pyqtSignal(str)
 
     def __init__(self, gui):
         super().__init__()
@@ -953,6 +997,7 @@ class Worker(QObject):
         self.newMessage.connect(self.gui.printMessage)
         self.recordingStarted.connect(self.gui.handleRecordingStarted)
         self.recordingStopped.connect(self.gui.handleRecordingStopped)
+        self.fileExistsErrorReceived.connect(self.gui.reportFileExists)
 
     def initLogger(self):
         self.logger = logging.getLogger(__name__)
@@ -961,16 +1006,14 @@ class Worker(QObject):
         handler.setFormatter(logging.Formatter(**LOGGING_FORMATTER_OPTIONS))
         self.logger.addHandler(handler)
 
-    @pyqtSlot(str, str, bool, dict)
-    def record(self, liveUrl, outputFile, overwrite, ffmpegOptions):
+    @pyqtSlot(str, str, int, dict)
+    def record(self, liveUrl, outputFile, fileExistsBehavior, ffmpegOptions):
         self.newMessage.emit('=' * 30 + '\n')
         self.logger.info('Recording initiated: %s', liveUrl)
-        self.logger.info('Recording to %s: %s (%s)',
-                         'directory' if os.path.isdir(outputFile) else 'file', outputFile,
-                         'overwrite if exists' if overwrite else 'never overwrite')
 
         connRecv, connSend = multiprocessing.Pipe()
-        recorder = RecorderProcess(liveUrl, outputFile, overwrite, ffmpegOptions, connSend)
+        recorder = RecorderProcess(
+            liveUrl, outputFile, fileExistsBehavior, ffmpegOptions, connSend)
         recorder.start()
 
         self.interrupted = False
@@ -981,6 +1024,10 @@ class Worker(QObject):
                     if obj.type == RecorderEvent.RECORDING_STARTED:
                         self.recordingStarted.emit(
                             obj.payload['start_time'],
+                            obj.payload['output_file'],
+                        )
+                    elif obj.type == RecorderEvent.OUTPUT_FILE_EXISTS:
+                        self.fileExistsErrorReceived.emit(
                             obj.payload['output_file'],
                         )
                 else:
@@ -1015,11 +1062,11 @@ class RecorderProcess(multiprocessing.Process):
 
     # If output_file is a directory, let youtube-dl determine the filename.
     # conn is the sending end of a multiprocessing.Pipe.
-    def __init__(self, live_url, output_file, overwrite, ffmpeg_options, conn):
+    def __init__(self, live_url, output_file, file_exists_behavior, ffmpeg_options, conn):
         super().__init__()
         self.live_url = live_url
         self.output_file = output_file
-        self.overwrite = overwrite
+        self.file_exists_behavior = file_exists_behavior
         self.log_level = ffmpeg_options['logLevel']
         self.hide_chunk_urls = self.log_level == 'info' and not ffmpeg_options['showChunkUrls']
         self.conn = conn
@@ -1030,12 +1077,46 @@ class RecorderProcess(multiprocessing.Process):
 
     def run(self):
         try:
+            output = self.output_file
             stream_url, auto_filename_no_ext = self.fetch_stream_info(self.live_url)
-            if os.path.isdir(self.output_file):
-                self.output_file = os.path.join(self.output_file, '%s.ts' % auto_filename_no_ext)
 
-            self.logger.info('Output file: %s', self.output_file)
-            self.record_stream(stream_url, self.output_file, overwrite=self.overwrite)
+            if os.path.isdir(output):
+                output = os.path.join(output, '%s.ts' % auto_filename_no_ext)
+            if os.path.exists(output):
+                if self.file_exists_behavior == FileExistsBehavior.REPORT_ERROR:
+                    self.logger.error('File "%s" already exists', output)
+                    self.conn.send(RecorderEvent(RecorderEvent.OUTPUT_FILE_EXISTS, dict(
+                        output_file=output,
+                    )))
+                    sys.exit(1)
+
+                self.logger.warning('File "%s" already exists', output)
+                if self.file_exists_behavior == FileExistsBehavior.APPEND_NUMERIC_SUFFIX:
+                    base, ext = os.path.splitext(output)
+                    index = 1
+                    while True:
+                        output = '%s (%d)%s' % (base, index, ext)
+                        if not os.path.exists(output):
+                            break
+                        index += 1
+                    self.logger.warning('Appending numeric suffix " (%d)"', index)
+                elif self.file_exists_behavior == FileExistsBehavior.APPEND_TIMESTAMP_SUFFIX:
+                    base, ext = os.path.splitext(output)
+                    timestamp = time.strftime('%Y-%m-%d %H.%M.%S')
+                    self.logger.warning('Appending timestamp suffix " (%s)"', timestamp)
+                    output = '%s (%s)%s' % (base, timestamp, ext)
+                elif self.file_exists_behavior == FileExistsBehavior.OVERWRITE:
+                    self.logger.warning('Overwriting output file')
+                else:
+                    raise NotImplementedError('Unknown fileExistsBehavior %d' %
+                                              self.file_exists_behavior)
+
+            self.output_file = output
+
+            overwrite = self.file_exists_behavior = FileExistsBehavior.OVERWRITE
+
+            self.logger.info('Output file: %s', output)
+            self.record_stream(stream_url, output, overwrite=overwrite)
 
             self.conn.close()
         except Exception:  # pylint: disable=broad-except
@@ -1207,6 +1288,7 @@ class RecorderEvent(object):
 
     # Event types
     RECORDING_STARTED = 0
+    OUTPUT_FILE_EXISTS = 1
 
     def __init__(self, type_, payload=None):
         self.type = type_

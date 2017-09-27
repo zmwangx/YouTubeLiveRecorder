@@ -276,8 +276,11 @@ class MainWindow(QMainWindow):
         settings = self.settings
 
         config.liveUrl = settings.value('liveUrl', '')
-        config.downloadsDir = settings.value('downloadsDir', DEFAULT_DOWNLOADS_DIR)
+        config.downloadsDir = os.path.normpath(
+            settings.value('downloadsDir', DEFAULT_DOWNLOADS_DIR))
         config.outputFile = settings.value('outputFile', '')
+        if config.outputFile:
+            config.outputFile = settings.value(config.outputFile)
         config.overwrite = settings.value('overwrite', False, type=bool)
         config.ffmpegOptions['logLevel'] = settings.value('ffmpegLogLevel', 'info')
         config.ffmpegOptions['showChunkUrls'] = settings.value('ffmpegShowChunkUrls', False,
@@ -397,7 +400,7 @@ class MainWindow(QMainWindow):
             currentFilename if currentFilename else self.config.downloadsDir,
             'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
         if filename:
-            self.outputFileInputBox.setText(filename)
+            self.outputFileInputBox.setText(os.path.normpath(filename))
 
     @pyqtSlot()
     def initiateRecording(self):
@@ -767,7 +770,7 @@ class ConfigureWindow(QDialog):
             currentFilename if currentFilename else self.downloadsDirBox.text(),
             'MPEG-TS Files (*.ts *.m2t *.m2ts)', options=options)
         if filename:
-            self.outputFileBox.setText(filename)
+            self.outputFileBox.setText(os.path.normpath(filename))
 
     @pyqtSlot()
     def selectDownloadsDir(self):
@@ -777,7 +780,7 @@ class ConfigureWindow(QDialog):
         dirname = QFileDialog.getExistingDirectory(
             self, 'Default downloads directory', currentDir, options=options)
         if dirname:
-            self.downloadsDirBox.setText(dirname)
+            self.downloadsDirBox.setText(os.path.normpath(dirname))
 
 
 class DepChecker(QThread):

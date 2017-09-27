@@ -20,6 +20,7 @@ import humanize
 import psutil
 from PyQt5.QtCore import (
     Qt,
+    QEvent,
     QObject,
     QSettings,
     QThread,
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
         self.initUI()
         self.initDefaults()
         self.initSignals()
+        self.installEventFilter(self)
 
         self.checkDeps()
 
@@ -321,6 +323,14 @@ class MainWindow(QMainWindow):
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('windowState', self.saveState())
         super().closeEvent(event)
+
+    def eventFilter(self, obj, event):  # pylint: disable=unused-argument
+        # Ignore StatusTip events. This way status bar message does not
+        # disappear when hovering over a menu item.
+        if event.type() == QEvent.StatusTip:
+            return True
+        else:
+            return False
 
     @pyqtSlot()
     def openAboutWindow(self):

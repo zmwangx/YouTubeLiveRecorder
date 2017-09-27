@@ -185,6 +185,10 @@ def systemFixedWidthFont():
     return QFontDatabase.systemFont(QFontDatabase.FixedFont)
 
 
+def systemOpen(path):
+    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+
 class MainWindow(QMainWindow):
 
     recordingInitiated = pyqtSignal(str, str, bool, dict)
@@ -249,6 +253,9 @@ class MainWindow(QMainWindow):
         revealFileAction.setShortcut('Alt+Ctrl+O')
         revealFileAction.triggered.connect(self.revealRecordedFile)
 
+        openDebugLogAction = QAction('&Open debug log', self)
+        openDebugLogAction.triggered.connect(self.openDebugLog)
+
         copyLogsAction = QAction('&Copy logs to clipboard', self)
         copyLogsAction.triggered.connect(self.copyLogs)
 
@@ -268,6 +275,8 @@ class MainWindow(QMainWindow):
         fileMenu.addSeparator()
         fileMenu.addAction(openFileAction)
         fileMenu.addAction(revealFileAction)
+        fileMenu.addSeparator()
+        fileMenu.addAction(openDebugLogAction)
 
         editMenu = menubar.addMenu('&Edit')
         editMenu.addAction(copyLogsAction)
@@ -419,7 +428,7 @@ class MainWindow(QMainWindow):
         if file is None:
             QMessageBox.warning(self, 'Warning', 'You have\'t recorded to a file yet.')
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(file))
+            systemOpen(file)
 
     @pyqtSlot()
     def revealRecordedFile(self):
@@ -430,7 +439,17 @@ class MainWindow(QMainWindow):
         if file is None:
             QMessageBox.warning(self, 'Warning', 'You have\'t recorded to a file yet.')
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(file)))
+            systemOpen(os.path.dirname(file))
+
+    @pyqtSlot()
+    def openDebugLog(self):
+        if not os.path.isfile(EXCEPTIONS_LOGFILE):
+            try:
+                with open(EXCEPTIONS_LOGFILE, 'w'):
+                    pass
+            except OSError:
+                pass
+        systemOpen(EXCEPTIONS_LOGFILE)
 
     @pyqtSlot()
     def copyLogs(self):

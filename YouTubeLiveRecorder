@@ -3,6 +3,7 @@
 import enum
 import json
 import html
+import io
 import logging
 import multiprocessing
 import os
@@ -97,6 +98,11 @@ WINDOWS = platform.system() == 'Windows'
 
 DEFAULT_DOWNLOADS_DIR = os.path.expanduser(r'~\Downloads' if WINDOWS else '~/Downloads')
 
+DECODING_PARAMS = dict(
+    encoding='utf-8',
+    errors='backslashreplace',
+)
+
 NOT_READY = object()
 
 
@@ -126,10 +132,8 @@ def subprocess_startupinfo():
 
 def standard_subprocess_kwargs():
     return dict(
-        bufsize=1,
-        universal_newlines=True,
-        encoding='utf-8',
-        errors='backslashreplace',
+        stdin=subprocess.DEVNULL,
+        bufsize=0,
         startupinfo=subprocess_startupinfo(),
     )
 
@@ -249,6 +253,7 @@ class MainWindow(QMainWindow):
         messagesBox = QTextEdit(self, readOnly=True)
         messagesBox.setFont(systemFixedWidthFont())
         messagesBox.setWordWrapMode(QTextOption.WrapAnywhere)
+        messagesBox.endedOnCr = False  # Used in self.printMessage
 
         mainLayout = QGridLayout(spacing=8)
         mainLayout.addWidget(urlInputLabel, 0, 0)
@@ -517,11 +522,37 @@ class MainWindow(QMainWindow):
         box.moveCursor(QTextCursor.End)
         # Restore text color to black.
         box.setTextColor(QColor('black'))
+
+        # Mitigation for extra newlines issue on Windows when FFmpeg
+        # loglevel is at least debug.
+        #
+        # The problem is that we could receive the messages like the
+        # example below in succession (one message on each line):
+        #
+        #   User-Agent: Lavf/57.71.100\r
+        #   \r\n
+        #   Accept: */*\r
+        #   ...
+        #
+        # Clearly the extra CR in the first message is causing trouble
+        # here. However, we can't simply rstrip all messages, because we
+        # rely on \r to separate progress info on loglevel 'info'.
+        #
+        # Therefore, we record whether the last character written was a
+        # CR, and it was, we strip leading LF or CRLF.
+        if WINDOWS:
+            message = message.replace('\r\n', '\n')
+            if box.endedOnCr and message.startswith('\n'):
+                message = message[1:]
+
         for type_, text in self.parseMessage(message):
             if type_ == Printable.HTML:
                 box.insertHtml(text)
+                box.endedOnCr = False
             else:  # Printable.PLAIN
                 box.insertPlainText(text)
+                if text.endswith('\r'):
+                    box.endedOnCr = True
         box.moveCursor(QTextCursor.End)
 
         if userScrolledBack:
@@ -823,7 +854,6 @@ class DepChecker(QThread):
         try:
             proc = subprocess.Popen(
                 self.command,
-                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 **standard_subprocess_kwargs(),
@@ -841,7 +871,7 @@ class DepChecker(QThread):
             self.sendVersion(None)
             return
 
-        version = self.outputProcessor(stdout)
+        version = self.outputProcessor(stdout.decode(**DECODING_PARAMS))
         self.sendVersion(version)
 
 
@@ -965,13 +995,15 @@ class RecorderProcess(multiprocessing.Process):
     # Handle output streams (stdout, stderr, or combined) of a
     # subprocess in real time, line by line, to depletion.
     #
-    # The subprocess should be opened with bufsize=1 and
-    # universal_newlines=True (text mode, line buffered).
+    # The subprocess should be opened in binary mode (without encoding,
+    # errors, or universal_newlines) with bufsize=0 (unbuffered
+    # stdout/stderr).
     #
     # Credit: https://stackoverflow.com/a/4896288
     def handle_output(self, process, streams, handlers):
         def queue_up_read(fp, queue_):
-            for line in fp:
+            text_wrapper = io.TextIOWrapper(fp, newline='', **DECODING_PARAMS)
+            for line in text_wrapper:
                 queue_.put(line)
 
         output_queues = [queue.Queue() for _ in streams]
@@ -1013,7 +1045,6 @@ class RecorderProcess(multiprocessing.Process):
             ytdl_process = None
             ytdl_process = subprocess.Popen(
                 ytdl_cmd,
-                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 **standard_subprocess_kwargs(),
@@ -1070,7 +1101,7 @@ class RecorderProcess(multiprocessing.Process):
 
     CHUNK_URL_LINE_PATTERN = re.compile(r'(^|(?<=[\n\r]))\[.*?\] '
                                         r'Opening \'https://[^.]+\.googlevideo\.com/[^\']+\''
-                                        r'.*?[\r\n]')
+                                        r'.*?(\n|\r\n)')
 
     def record_stream(self, stream_url, output_file, overwrite=False):
         try:
@@ -1087,7 +1118,6 @@ class RecorderProcess(multiprocessing.Process):
             ffmpeg_process = None
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_cmd,
-                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 **standard_subprocess_kwargs(),

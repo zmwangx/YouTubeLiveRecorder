@@ -214,6 +214,13 @@ def systemOpen(path):
     QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
 
+def unsetFlag(flag, getter=None, setter=None):
+    value = getter()
+    if value & flag:
+        value ^= flag
+    setter(value)
+
+
 class MainWindow(QMainWindow):
 
     recordingInitiated = pyqtSignal(str, str, int, dict)
@@ -777,6 +784,8 @@ class AboutWindow(QDialog):
 
     def initUI(self):
         self.setWindowTitle('About')
+        unsetFlag(Qt.WindowContextHelpButtonHint,
+                  getter=self.windowFlags, setter=self.setWindowFlags)
 
         main = self.mainWindow
         # Wait for dep versions (max 5 seconds)
@@ -813,6 +822,8 @@ class ConfigureWindow(QDialog):
 
     def initUI(self):
         self.setWindowTitle('Preferences' if MACOS else 'Settings')
+        unsetFlag(Qt.WindowContextHelpButtonHint,
+                  getter=self.windowFlags, setter=self.setWindowFlags)
 
         urlInfoLabel = QLabel('*Default livestream URL:')
         urlBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')

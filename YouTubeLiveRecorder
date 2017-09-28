@@ -267,21 +267,21 @@ class MainWindow(QMainWindow):
         stopAction.setShortcut('Ctrl+S')
         stopAction.triggered.connect(self.cancelRecording)
 
-        openFileAction = QAction('&Open recorded file', self)
+        openFileAction = QAction('&Open Recorded File', self)
         openFileAction.setShortcut('Ctrl+O')
         openFileAction.triggered.connect(self.openRecordedFile)
 
-        revealFileAction = QAction('&Reveal recorded file in folder', self)
+        revealFileAction = QAction('&Reveal Recorded File in Folder', self)
         revealFileAction.setShortcut('Alt+Ctrl+O')
         revealFileAction.triggered.connect(self.revealRecordedFile)
 
-        openDebugLogAction = QAction('&Open debug log', self)
+        openDebugLogAction = QAction('&Open Debug Log', self)
         openDebugLogAction.triggered.connect(self.openDebugLog)
 
-        copyLogsAction = QAction('&Copy logs to clipboard', self)
+        copyLogsAction = QAction('&Copy Logs to Clipboard', self)
         copyLogsAction.triggered.connect(self.copyLogs)
 
-        clearLogsAction = QAction('&Clear the logs buffer', self)
+        clearLogsAction = QAction('&Clear Logs Buffer', self)
         clearLogsAction.setShortcut('Ctrl+K')
         clearLogsAction.triggered.connect(self.clearLogs)
 

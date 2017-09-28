@@ -2,3 +2,4 @@ PyQt5
 appdirs
 humanize
 psutil
+setuptools

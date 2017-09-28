@@ -240,7 +240,7 @@ class MainWindow(QMainWindow):
 
         lastUpdateCheck = self.settings.value('lastUpdateCheck', 0, type=int)
         if time.time() - lastUpdateCheck >= 22 * 3600:  # 22 hours
-            self.checkForUpdate()
+            self.autoCheckForUpdate()
 
     def initUI(self):
         self.resize(500, 400)
@@ -460,8 +460,36 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def checkForUpdate(self):
-        self.updateCheckerThread = UpdateChecker(self)
+        self.updateCheckerThread = UpdateChecker(self, userInitiated=True)
         self.updateCheckerThread.start()
+
+    @pyqtSlot()
+    def autoCheckForUpdate(self):
+        self.updateCheckerThread = UpdateChecker(self, userInitiated=False)
+        self.updateCheckerThread.start()
+
+    @pyqtSlot(str, str)
+    def remindNewVersion(self, newVersion, newVersionUrl):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Update Available')
+        dialog.setText(f'The latest versioan of {APP_NAME} is {newVersion}. '
+                       f'You are running {APP_VERSION}. '
+                       f'Do you want to update?')
+        laterButton = dialog.addButton('Decide Later', QMessageBox.RejectRole)
+        skipButton = dialog.addButton('Skip This Version', QMessageBox.RejectRole)
+        downloadButton = dialog.addButton('Go to Download Page', QMessageBox.ActionRole)
+        dialog.setDefaultButton(downloadButton)
+        dialog.setEscapeButton(laterButton)
+        dialog.exec_()
+        clickedButton = dialog.clickedButton()
+        if clickedButton == skipButton:
+            self.settings.setValue('skippedVersion', newVersion)
+        elif clickedButton == downloadButton:
+            QDesktopServices.openUrl(QUrl(newVersionUrl))
+
+    @pyqtSlot()
+    def remindAlreadyUpToDate(self):
+        QMessageBox.information(self, 'Info', 'Already up-to-date.')
 
     @pyqtSlot()
     def openConfigureWindow(self):
@@ -1006,16 +1034,19 @@ class DepChecker(QThread):
 
 class UpdateChecker(QThread):
 
-    newVersionFound = pyqtSignal(str)
+    newVersionFound = pyqtSignal(str, str)
+    alreadyUpToDate = pyqtSignal()
 
-    def __init__(self, gui):
+    def __init__(self, gui, userInitiated=True):
         super().__init__()
         self.gui = gui
+        self.userInitiated = userInitiated
         self.settings = QSettings()
         self.initSignals()
 
     def initSignals(self):
         self.newVersionFound.connect(self.gui.remindNewVersion)
+        self.alreadyUpToDate.connect(self.gui.remindAlreadyUpToDate)
 
     def run(self):
         try:
@@ -1026,15 +1057,22 @@ class UpdateChecker(QThread):
             resp = urllib.request.urlopen(req)
             respObj = json.load(resp)
             latestVersion = respObj[0]['name']  # pre-releases included
+            latestVersionUrl = respObj[0]['html_url']
         except Exception:  # pylint: disable=broad-except
             pass
         else:
             self.settings.setValue('lastUpdateCheck', int(time.time()))
-            userSkippedVersion = self.settings.value('skippedVersion', '')
             parse = pkg_resources.parse_version
-            if ((parse(APP_VERSION) < parse(latestVersion) and
-                 parse(userSkippedVersion) < parse(latestVersion))):
-                self.newVersionFound.emit(latestVersion)
+            userSkippedVersion = self.settings.value('skippedVersion', '')
+            if parse(userSkippedVersion) <= parse(APP_VERSION):
+                self.settings.remove('skippedVersion')
+
+            if not self.userInitiated and parse(latestVersion) <= parse(userSkippedVersion):
+                return
+            if parse(APP_VERSION) < parse(latestVersion):
+                self.newVersionFound.emit(latestVersion, latestVersionUrl)
+            elif self.userInitiated:
+                self.alreadyUpToDate.emit()
 
 
 class Worker(QObject):

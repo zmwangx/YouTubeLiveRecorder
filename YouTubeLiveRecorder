@@ -97,6 +97,7 @@ LOGGING_FORMATTER_OPTIONS = dict(
 )
 
 WINDOWS = platform.system() == 'Windows'
+MACOS = sys.platform == 'darwin'
 
 DEFAULT_DOWNLOADS_DIR = os.path.expanduser(r'~\Downloads' if WINDOWS else '~/Downloads')
 
@@ -252,10 +253,11 @@ class MainWindow(QMainWindow):
         self.recordingTimer = None
         self.updateStatusMessage()
 
-        openAboutWindowAction = QAction('&About', self)
+        openAboutWindowAction = QAction('&About', self, menuRole=QAction.AboutRole)
         openAboutWindowAction.triggered.connect(self.openAboutWindow)
 
-        openConfigureWindowAction = QAction('&Configure...', self)
+        openConfigureWindowAction = QAction('&Settings...', self,
+                                            menuRole=QAction.PreferencesRole)
         openConfigureWindowAction.setShortcut('Ctrl+,')
         openConfigureWindowAction.triggered.connect(self.openConfigureWindow)
 
@@ -287,9 +289,10 @@ class MainWindow(QMainWindow):
 
         menubar = self.menuBar()
 
-        configurationMenu = menubar.addMenu('&Configuration')
-        configurationMenu.addAction(openAboutWindowAction)
-        configurationMenu.addAction(openConfigureWindowAction)
+        applicationMenu = menubar.addMenu('&Application')
+        applicationMenu.addAction(openAboutWindowAction)
+        applicationMenu.addSeparator()
+        applicationMenu.addAction(openConfigureWindowAction)
 
         fileMenu = menubar.addMenu('&File')
         fileMenu.addAction(recordAction)
@@ -760,7 +763,7 @@ class ConfigureWindow(QDialog):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle('Preferences')
+        self.setWindowTitle('Preferences' if MACOS else 'Settings')
 
         urlInfoLabel = QLabel('*Default livestream URL:')
         urlBox = QLineEdit(self, placeholderText='Ex: https://youtube.com/ChinaSNH48/live')

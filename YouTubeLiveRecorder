@@ -114,6 +114,12 @@ DECODING_PARAMS = dict(
 
 NOT_READY = object()
 
+# On *nix platforms, make sure /usr/local/bin is in search path. This is
+# mostly useful for the macOS app, which would not be able to find
+# youtube-dl and ffmpeg in /usr/local/bin otherwise.
+if os.name == 'posix' and '/usr/local/bin' not in os.get_exec_path():
+    os.environ['PATH'] += ':/usr/local/bin'
+
 
 class FileExistsBehavior(enum.IntEnum):
     APPEND_NUMERIC_SUFFIX = 0

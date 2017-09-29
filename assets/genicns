@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+here=$0:A:h
+iconset=$here/YouTubeLiveRecorder.iconset
+mkdir -p $iconset
+for res in 16 32 128 256 512; do
+    (( res2x = res * 2 ))
+    sips -z $res $res $here/icon-1024.png --out $iconset/icon_${res}x${res}.png
+    sips -z $res2x $res2x $here/icon-1024.png --out $iconset/icon_${res}x${res}@2x.png
+done
+iconutil -c icns $iconset

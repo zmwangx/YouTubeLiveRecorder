@@ -31,6 +31,10 @@ pip install -r requirements.txt
 python YouTubeLiveRecorder
 ```
 
+## Notes
+
+- `youtube-dl` actually has supported MPEG-TS since [`v2016.01.31`](https://github.com/rg3/youtube-dl/commit/a69bee4762044b657e1fd8bd4cf0baa58d950bc3) through the `--hls-use-mpegts`, which makes YTLR rather redundant (other than being a GUI). Unfortunately I did not realize this when I started the development of YTLR.
+
 ## License
 
 Copyright © 2017 Zhiming Wang <zmwangx@gmail.com>

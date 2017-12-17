@@ -11,6 +11,10 @@
 - [FFmpeg](https://ffmpeg.org/download.html);
 - For users running the standalone exe build on Windows, [Microsoft Visual C++ 2010 Redistributable Package (x86)](https://www.microsoft.com/en-US/download/details.aspx?id=5555), or another version of this package (if you installed the standalone `youtube-dl.exe`, you probably already installed this).
 
+## Download
+
+Check out [the latest release](https://github.com/zmwangx/YouTubeLiveRecorder/releases/latest), with binaries for both macOS and Windows.
+
 ## Development
 
 With Python 3.6 or later,
